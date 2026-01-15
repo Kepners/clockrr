@@ -271,6 +271,145 @@ app.use((req, res, next) => {
     next()
 })
 
+// =============================================================================
+// LANDING PAGE
+// =============================================================================
+app.get('/', (req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flash Clock - Stremio Addon</title>
+    <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #524948 0%, #3a3433 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #fff;
+        }
+        .container {
+            text-align: center;
+            max-width: 600px;
+        }
+        .logo {
+            width: 120px;
+            height: 120px;
+            margin-bottom: 24px;
+            filter: drop-shadow(0 8px 24px rgba(0,0,0,0.3));
+        }
+        h1 {
+            font-size: 48px;
+            margin-bottom: 12px;
+            text-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .tagline {
+            font-size: 20px;
+            opacity: 0.9;
+            margin-bottom: 32px;
+        }
+        .features {
+            background: rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 32px;
+            text-align: left;
+        }
+        .features h3 {
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .features ul {
+            list-style: none;
+            padding: 0;
+        }
+        .features li {
+            padding: 8px 0;
+            padding-left: 28px;
+            position: relative;
+        }
+        .features li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #70F8BA;
+            font-weight: bold;
+        }
+        .buttons {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn {
+            display: inline-block;
+            padding: 16px 32px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #70F8BA 0%, #CAFE48 100%);
+            color: #333;
+            box-shadow: 0 8px 24px rgba(112, 248, 186, 0.3);
+        }
+        .btn-secondary {
+            background: rgba(255,255,255,0.15);
+            color: #fff;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        .footer {
+            margin-top: 48px;
+            opacity: 0.6;
+            font-size: 14px;
+        }
+        .footer a {
+            color: #7CB4B8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico" alt="Flash Clock" class="logo">
+        <h1>🕒 Flash Clock</h1>
+        <p class="tagline">See the real time while watching - via subtitle overlay</p>
+
+        <div class="features">
+            <h3>Features</h3>
+            <ul>
+                <li>Shows current time in top-right corner</li>
+                <li>Flash mode - appears briefly, then disappears</li>
+                <li>Always-on mode for continuous display</li>
+                <li>12h or 24h time format</li>
+                <li>Configurable flash duration & interval</li>
+                <li>Works with movies & TV shows</li>
+            </ul>
+        </div>
+
+        <div class="buttons">
+            <a href="stremio://clockrr.vercel.app/manifest.json" class="btn btn-primary">Install Addon</a>
+            <a href="/configure" class="btn btn-secondary">Configure</a>
+        </div>
+
+        <p class="footer">
+            Open source on <a href="https://github.com/Kepners/clockrr" target="_blank">GitHub</a>
+        </p>
+    </div>
+</body>
+</html>`)
+})
+
 // WebVTT endpoint - must be before addon router
 app.get('/flashclock.vtt', (req, res) => {
     const config = parseConfig(req.query.cfg)
