@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout /t 2 /nobreak)",
+      "Bash(curl:*)",
+      "Bash(powershell -Command \"Invoke-RestMethod -Uri ''http://localhost:7000/manifest.json'' | ConvertTo-Json -Depth 10\")",
+      "Bash(powershell:*)",
+      "Bash(node:*)",
+      "mcp__ref__ref_search_documentation",
+      "mcp__google-search__search",
+      "mcp__exa__web_search_exa",
+      "mcp__duckduckgo-search__search",
+      "mcp__duckduckgo-search__fetch_content",
+      "mcp__github__search_code",
+      "mcp__github__get_file_contents",
+      "mcp__github__search_repositories",
+      "Bash(taskkill:*)",
+      "Bash(vercel --help:*)",
+      "Bash(where:*)",
+      "Bash(cloudflared tunnel:*)",
+      "Bash(set ADDON_URL=https://fairfield-that-desert-meal.trycloudflare.com)"
+    ]
+  }
+}
