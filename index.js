@@ -19,7 +19,7 @@ const DEFAULTS = {
 const manifest = {
     id: 'com.kepners.flashclock',
     version: '1.0.0',
-    name: '🕒 Flash Clock (Top Right)',
+    name: '🕒 Clockrr (Top Right)',
     description: 'Digital clock overlay via subtitles - flashes current time briefly, then disappears. Perfect for checking time when pausing.',
     logo: 'https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico',
     background: '#524948',
@@ -223,7 +223,7 @@ function encodeConfig(config) {
 const PORT = process.env.PORT || 7000
 
 builder.defineSubtitlesHandler(({ type, id, config }) => {
-    console.log(`[Flash Clock] Subtitles request: type=${type}, id=${id}`)
+    console.log(`[Clockrr] Subtitles request: type=${type}, id=${id}`)
 
     if (!['movie', 'series'].includes(type)) {
         return Promise.resolve({ subtitles: [] })
@@ -248,7 +248,7 @@ builder.defineSubtitlesHandler(({ type, id, config }) => {
             {
                 id: 'flashclock-time',
                 lang: 'eng',
-                label: '🕒 Flash Clock (Top Right)',
+                label: '🕒 Clockrr (Top Right)',
                 url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}`
             }
         ]
@@ -280,10 +280,10 @@ app.get('/', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flash Clock - Stremio Addon</title>
+    <title>Clockrr - Stremio Addon</title>
     <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico">
-    <meta name="description" content="See the real time while watching movies and TV shows. Flash Clock adds a subtle clock overlay via subtitles.">
-    <meta property="og:title" content="Flash Clock - Stremio Addon">
+    <meta name="description" content="See the real time while watching movies and TV shows. Clockrr adds a clock overlay via subtitles - it gives you time.">
+    <meta property="og:title" content="Clockrr - Stremio Addon">
     <meta property="og:description" content="See the real time while watching - via subtitle overlay">
     <meta property="og:image" content="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -613,10 +613,10 @@ app.get('/', (req, res) => {
         <div class="hero">
             <div class="logo-wrapper">
                 <div class="logo-glow"></div>
-                <img src="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico" alt="Flash Clock" class="logo">
+                <img src="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico" alt="Clockrr" class="logo">
             </div>
-            <h1>Flash Clock</h1>
-            <p class="tagline">Know the time without leaving your movie</p>
+            <h1>Clockrr</h1>
+            <p class="tagline">It gives you time. Every OS. Every screen.</p>
             <div class="clock-demo" id="liveClock">--:--:--</div>
         </div>
 
@@ -637,9 +637,9 @@ app.get('/', (req, res) => {
                 <p>Choose 12h or 24h format, flash duration, repeat interval, and display mode.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">🎬</div>
-                <h3>Works Everywhere</h3>
-                <p>Compatible with all movies and TV shows in Stremio. Uses subtitle overlay technology.</p>
+                <div class="feature-icon">🌍</div>
+                <h3>Every Platform</h3>
+                <p>Windows, Mac, Linux, Android, iOS, Smart TVs - anywhere Stremio runs, Clockrr runs.</p>
             </div>
         </div>
 
@@ -710,7 +710,7 @@ function getConfigureHTML(currentConfig = {}) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flash Clock - Configure</title>
+    <title>Clockrr - Configure</title>
     <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -801,7 +801,7 @@ function getConfigureHTML(currentConfig = {}) {
 </head>
 <body>
     <div class="container">
-        <h1>🕒 Flash Clock</h1>
+        <h1>🕒 Clockrr</h1>
         <p class="subtitle">Configure your clock overlay settings</p>
 
         <div class="option-group">
@@ -922,7 +922,7 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
     const { config: configStr, type, id } = req.params
     const config = parseConfig(configStr)
 
-    console.log(`[Flash Clock] Config subtitles: type=${type}, id=${id}`)
+    console.log(`[Clockrr] Config subtitles: type=${type}, id=${id}`)
 
     if (!['movie', 'series'].includes(type)) {
         return res.json({ subtitles: [] })
@@ -944,7 +944,7 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
             {
                 id: 'flashclock-time',
                 lang: 'eng',
-                label: '🕒 Flash Clock (Top Right)',
+                label: '🕒 Clockrr (Top Right)',
                 url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}`
             }
         ]
