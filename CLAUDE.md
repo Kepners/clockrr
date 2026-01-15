@@ -41,16 +41,42 @@
 
 ## Development
 
-### Stremio Addon SDK
+### Stremio Addon SDK Setup (COMPLETE ✅)
 ```bash
+# Installed: stremio-addon-sdk@1.6.10
 npm install stremio-addon-sdk
 ```
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `index.js` | Main addon server - defines manifest, catalog, meta handlers |
+| `package.json` | Dependencies + scripts (`npm start`, `npm run dev`) |
+
+### Addon Structure
+```
+index.js
+├── Manifest: id, name, resources, types, catalogs
+├── defineCatalogHandler: Returns clock item with current time
+└── defineMetaHandler: Returns detailed clock info
+```
+
+### Resources Used
+- `catalog` - Shows clock in Stremio browse
+- `meta` - Shows time details when clicked
+- Type: `other` (not movie/series)
 
 ### Local Testing
 ```bash
 npm start
-# Open: http://localhost:7000/manifest.json
+# Server: http://localhost:7000
+# Manifest: http://localhost:7000/manifest.json
 # Install in Stremio: stremio://localhost:7000/manifest.json
+```
+
+### Auto-Launch (opens Stremio + installs)
+```bash
+npm run dev
 ```
 
 ---
@@ -60,10 +86,22 @@ npm start
 # Run locally
 npm start
 
+# Run + auto-install in Stremio
+npm run dev
+
 # Test manifest
 curl http://localhost:7000/manifest.json
 ```
 
 ---
 
+## TODO
+- [ ] Add actual logo image (replace placeholder)
+- [ ] Add poster image for clock item
+- [ ] Deploy to Beamup for public URL
+- [ ] Customize clock display format options
+
+---
+
 *Created: January 15, 2026*
+*SDK Setup: January 15, 2026*
