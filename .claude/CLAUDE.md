@@ -19,15 +19,32 @@
 ---
 
 ## Architecture
-[To be documented after spec]
+```
+Stremio Client
+    ↓ (HTTP request)
+index.js (Node.js server on port 7000)
+    ├── GET /manifest.json → Returns addon manifest
+    ├── GET /catalog/other/clockrr-main.json → Returns clock item
+    └── GET /meta/other/clockrr-time.json → Returns clock details
+```
+
+**SDK**: `stremio-addon-sdk@1.6.10`
 
 ---
 
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `index.js` | Main addon entry point |
-| `manifest.json` | Stremio addon manifest |
+| `index.js` | Main addon server - manifest + handlers (manifest embedded, not separate file) |
+| `package.json` | Dependencies: stremio-addon-sdk, scripts: start, dev |
+
+---
+
+## Addon Handlers
+| Handler | Purpose |
+|---------|---------|
+| `defineCatalogHandler` | Returns clock item with live time in name |
+| `defineMetaHandler` | Returns detailed time/date info |
 
 ---
 
@@ -37,7 +54,7 @@
 ---
 
 ## Session Notes
-- **Jan 15, 2026**: Project created
+- **Jan 15, 2026**: Project created, SDK installed, boilerplate complete
 
 ---
 
