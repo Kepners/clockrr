@@ -392,7 +392,7 @@ app.get('/configure', (req, res) => {
                 repeatIntervalSec: document.getElementById('repeatIntervalSec').value
             };
             const encoded = btoa(JSON.stringify(config));
-            const url = 'http://' + window.location.host + '/' + encoded + '/manifest.json';
+            const url = window.location.protocol + '//' + window.location.host + '/' + encoded + '/manifest.json';
             const input = document.getElementById('urlDisplay');
             input.value = url;
             input.style.display = 'block';
