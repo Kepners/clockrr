@@ -8,18 +8,9 @@ const express = require('express')
 // =============================================================================
 const DEFAULTS = {
     timeFormat: '24h',        // '24h' or '12h'
-    flashDurationSec: 10,     // 5, 10, or 15 seconds
-    repeatIntervalSec: 60,    // 30, 60, or 120 seconds
-    opacity: 70,              // 30-100
-    textSize: 'medium',       // 'small', 'medium', 'large'
-    shadow: true              // true or false
-}
-
-// Text size mappings (percentage)
-const TEXT_SIZES = {
-    small: '80%',
-    medium: '100%',
-    large: '130%'
+    flashDurationSec: 10,     // seconds clock is visible
+    repeatIntervalSec: 60,    // seconds between flashes
+    mode: 'flash'             // 'flash', 'always-on', 'subliminal'
 }
 
 // =============================================================================
@@ -30,7 +21,7 @@ const manifest = {
     version: '1.0.0',
     name: '🕒 Flash Clock (Top Right)',
     description: 'Digital clock overlay via subtitles - flashes current time briefly, then disappears. Perfect for checking time when pausing.',
-    logo: 'https://i.imgur.com/7kZ0ZQm.png',
+    logo: 'https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico',
     background: '#524948',
     resources: ['subtitles'],
     types: ['movie', 'series'],
@@ -60,27 +51,6 @@ const manifest = {
             title: 'Repeat Interval (seconds)',
             options: ['10', '20', '30', '60', '120', '300'],
             default: '60'
-        },
-        {
-            key: 'opacity',
-            type: 'select',
-            title: 'Opacity (%)',
-            options: ['10', '20', '30', '50', '70', '100'],
-            default: '70'
-        },
-        {
-            key: 'textSize',
-            type: 'select',
-            title: 'Text Size',
-            options: ['small', 'medium', 'large'],
-            default: 'medium'
-        },
-        {
-            key: 'shadow',
-            type: 'select',
-            title: 'Text Shadow',
-            options: ['yes', 'no'],
-            default: 'yes'
         },
         {
             key: 'mode',
@@ -161,28 +131,13 @@ function generateWebVTT(config, baseTime) {
         timeFormat = DEFAULTS.timeFormat,
         flashDurationSec = DEFAULTS.flashDurationSec,
         repeatIntervalSec = DEFAULTS.repeatIntervalSec,
-        opacity = DEFAULTS.opacity,
-        textSize = DEFAULTS.textSize,
-        shadow = DEFAULTS.shadow,
-        mode = 'flash'
+        mode = DEFAULTS.mode
     } = config
 
     const flashDuration = parseInt(flashDurationSec, 10)
     const repeatInterval = parseInt(repeatIntervalSec, 10)
-    const opacityVal = parseInt(opacity, 10) / 100
-
-    // Build STYLE block for supported players
-    const shadowStyle = shadow === 'yes' || shadow === true
-        ? 'text-shadow: 2px 2px 4px rgba(0,0,0,0.8);'
-        : ''
-
-    const fontSizeStyle = `font-size: ${TEXT_SIZES[textSize] || TEXT_SIZES.medium};`
-    const opacityStyle = `opacity: ${opacityVal};`
 
     let vtt = 'WEBVTT\n\n'
-
-    // Style block (supported by some players)
-    vtt += `STYLE\n::cue {\n  ${fontSizeStyle}\n  ${opacityStyle}\n  ${shadowStyle}\n  font-family: monospace;\n  color: white;\n  background-color: rgba(0,0,0,0.3);\n}\n\n`
 
     // Generate cues based on mode
     const totalSeconds = 12 * 60 * 60 // 12 hours
@@ -280,10 +235,7 @@ builder.defineSubtitlesHandler(({ type, id, config }) => {
         timeFormat: userConfig.timeFormat || DEFAULTS.timeFormat,
         flashDurationSec: userConfig.flashDurationSec || DEFAULTS.flashDurationSec,
         repeatIntervalSec: userConfig.repeatIntervalSec || DEFAULTS.repeatIntervalSec,
-        opacity: userConfig.opacity || DEFAULTS.opacity,
-        textSize: userConfig.textSize || DEFAULTS.textSize,
-        shadow: userConfig.shadow || DEFAULTS.shadow,
-        mode: userConfig.mode || 'flash'
+        mode: userConfig.mode || DEFAULTS.mode
     })
 
     // Get the addon base URL (auto-detect Vercel deployment)
@@ -393,23 +345,6 @@ app.get('/configure', (req, res) => {
             <option value="12h">12 Hour (AM/PM)</option>
         </select>
 
-        <label>Opacity</label>
-        <select id="opacity">
-            <option value="10">10% (barely visible)</option>
-            <option value="20">20%</option>
-            <option value="30">30% (subtle)</option>
-            <option value="50">50%</option>
-            <option value="70" selected>70% (default)</option>
-            <option value="100">100% (full)</option>
-        </select>
-
-        <label>Text Size</label>
-        <select id="textSize">
-            <option value="small">Small</option>
-            <option value="medium" selected>Medium</option>
-            <option value="large">Large</option>
-        </select>
-
         <label>Flash Duration (flash mode only)</label>
         <select id="flashDurationSec">
             <option value="3">3 seconds</option>
@@ -430,12 +365,6 @@ app.get('/configure', (req, res) => {
             <option value="300">Every 5 minutes</option>
         </select>
 
-        <label>Text Shadow</label>
-        <select id="shadow">
-            <option value="yes" selected>Yes</option>
-            <option value="no">No</option>
-        </select>
-
         <button class="btn" onclick="install()">Install Addon</button>
         <button class="btn" style="background:#7CB4B8;margin-top:10px" onclick="copyUrl()">Copy Install URL</button>
         <input type="text" id="urlDisplay" readonly style="width:100%;padding:10px;margin-top:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#70F8BA;font-size:12px;display:none">
@@ -448,11 +377,8 @@ app.get('/configure', (req, res) => {
             const config = {
                 mode: document.getElementById('mode').value,
                 timeFormat: document.getElementById('timeFormat').value,
-                opacity: document.getElementById('opacity').value,
-                textSize: document.getElementById('textSize').value,
                 flashDurationSec: document.getElementById('flashDurationSec').value,
-                repeatIntervalSec: document.getElementById('repeatIntervalSec').value,
-                shadow: document.getElementById('shadow').value
+                repeatIntervalSec: document.getElementById('repeatIntervalSec').value
             };
             const encoded = btoa(JSON.stringify(config));
             const url = 'stremio://' + window.location.host + '/' + encoded + '/manifest.json';
@@ -462,11 +388,8 @@ app.get('/configure', (req, res) => {
             const config = {
                 mode: document.getElementById('mode').value,
                 timeFormat: document.getElementById('timeFormat').value,
-                opacity: document.getElementById('opacity').value,
-                textSize: document.getElementById('textSize').value,
                 flashDurationSec: document.getElementById('flashDurationSec').value,
-                repeatIntervalSec: document.getElementById('repeatIntervalSec').value,
-                shadow: document.getElementById('shadow').value
+                repeatIntervalSec: document.getElementById('repeatIntervalSec').value
             };
             const encoded = btoa(JSON.stringify(config));
             const url = 'http://' + window.location.host + '/' + encoded + '/manifest.json';
