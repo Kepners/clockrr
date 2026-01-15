@@ -290,7 +290,263 @@ app.get('/flashclock.vtt', (req, res) => {
     res.send(vtt)
 })
 
-// Mount Stremio addon router
+// =============================================================================
+// CONFIGURE PAGE (Torrentio-style)
+// =============================================================================
+function getConfigureHTML(currentConfig = {}) {
+    const config = {
+        timeFormat: currentConfig.timeFormat || DEFAULTS.timeFormat,
+        flashDurationSec: currentConfig.flashDurationSec || DEFAULTS.flashDurationSec,
+        repeatIntervalSec: currentConfig.repeatIntervalSec || DEFAULTS.repeatIntervalSec,
+        mode: currentConfig.mode || DEFAULTS.mode
+    }
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flash Clock - Configure</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #524948 0%, #3a3433 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: #fff;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 420px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #57467B;
+            font-size: 24px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        .option-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            background: #fff;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        select:focus {
+            outline: none;
+            border-color: #57467B;
+        }
+        .install-btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #57467B 0%, #7CB4B8 100%);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: center;
+            margin-top: 24px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .install-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(87, 70, 123, 0.4);
+        }
+        .note {
+            margin-top: 16px;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🕒 Flash Clock</h1>
+        <p class="subtitle">Configure your clock overlay settings</p>
+
+        <div class="option-group">
+            <label>Time Format</label>
+            <select id="timeFormat" onchange="updateLink()">
+                <option value="24h" ${config.timeFormat === '24h' ? 'selected' : ''}>24-hour (14:30)</option>
+                <option value="12h" ${config.timeFormat === '12h' ? 'selected' : ''}>12-hour (2:30 PM)</option>
+            </select>
+        </div>
+
+        <div class="option-group">
+            <label>Display Mode</label>
+            <select id="mode" onchange="updateLink()">
+                <option value="flash" ${config.mode === 'flash' ? 'selected' : ''}>Flash (shows briefly, then hides)</option>
+                <option value="always-on" ${config.mode === 'always-on' ? 'selected' : ''}>Always On (continuous)</option>
+                <option value="subliminal" ${config.mode === 'subliminal' ? 'selected' : ''}>Subliminal (50ms flash)</option>
+            </select>
+        </div>
+
+        <div class="option-group" id="flashOptions">
+            <label>Flash Duration</label>
+            <select id="flashDurationSec" onchange="updateLink()">
+                <option value="3" ${config.flashDurationSec === '3' ? 'selected' : ''}>3 seconds</option>
+                <option value="5" ${config.flashDurationSec === '5' ? 'selected' : ''}>5 seconds</option>
+                <option value="10" ${config.flashDurationSec == '10' ? 'selected' : ''}>10 seconds</option>
+                <option value="15" ${config.flashDurationSec === '15' ? 'selected' : ''}>15 seconds</option>
+                <option value="30" ${config.flashDurationSec === '30' ? 'selected' : ''}>30 seconds</option>
+                <option value="60" ${config.flashDurationSec === '60' ? 'selected' : ''}>60 seconds</option>
+            </select>
+        </div>
+
+        <div class="option-group" id="intervalOptions">
+            <label>Repeat Interval</label>
+            <select id="repeatIntervalSec" onchange="updateLink()">
+                <option value="10" ${config.repeatIntervalSec === '10' ? 'selected' : ''}>Every 10 seconds</option>
+                <option value="20" ${config.repeatIntervalSec === '20' ? 'selected' : ''}>Every 20 seconds</option>
+                <option value="30" ${config.repeatIntervalSec === '30' ? 'selected' : ''}>Every 30 seconds</option>
+                <option value="60" ${config.repeatIntervalSec == '60' ? 'selected' : ''}>Every 60 seconds</option>
+                <option value="120" ${config.repeatIntervalSec === '120' ? 'selected' : ''}>Every 2 minutes</option>
+                <option value="300" ${config.repeatIntervalSec === '300' ? 'selected' : ''}>Every 5 minutes</option>
+            </select>
+        </div>
+
+        <a id="installLink" class="install-btn" href="#">Install Addon</a>
+
+        <p class="note">Clicking Install will update your existing addon configuration</p>
+    </div>
+
+    <script>
+        function updateLink() {
+            const mode = document.getElementById('mode').value;
+            const flashOpts = document.getElementById('flashOptions');
+            const intervalOpts = document.getElementById('intervalOptions');
+
+            // Show/hide flash-specific options
+            if (mode === 'flash') {
+                flashOpts.style.display = 'block';
+                intervalOpts.style.display = 'block';
+            } else {
+                flashOpts.style.display = 'none';
+                intervalOpts.style.display = 'none';
+            }
+
+            const config = {
+                timeFormat: document.getElementById('timeFormat').value,
+                mode: mode,
+                flashDurationSec: document.getElementById('flashDurationSec').value,
+                repeatIntervalSec: document.getElementById('repeatIntervalSec').value
+            };
+
+            const configStr = btoa(JSON.stringify(config));
+            const host = window.location.host;
+            const protocol = window.location.protocol;
+
+            // Use stremio:// protocol for install
+            document.getElementById('installLink').href = 'stremio://' + host + '/' + configStr + '/manifest.json';
+        }
+
+        // Initialize on load
+        updateLink();
+    </script>
+</body>
+</html>`
+}
+
+// Configure page routes
+app.get('/configure', (req, res) => {
+    res.send(getConfigureHTML({}))
+})
+
+app.get('/:config/configure', (req, res) => {
+    const config = parseConfig(req.params.config)
+    res.send(getConfigureHTML(config))
+})
+
+// =============================================================================
+// CONFIG-BASED MANIFEST ROUTES (Torrentio-style)
+// =============================================================================
+app.get('/:config/manifest.json', (req, res) => {
+    const config = parseConfig(req.params.config)
+
+    // Return manifest with config embedded
+    const configuredManifest = {
+        ...manifest,
+        // Pass config to handlers via query params in resource URLs
+        behaviorHints: {
+            ...manifest.behaviorHints,
+            configurable: true,
+            configurationRequired: false
+        }
+    }
+
+    res.json(configuredManifest)
+})
+
+// Config-based subtitles endpoint
+app.get('/:config/subtitles/:type/:id.json', (req, res) => {
+    const { config: configStr, type, id } = req.params
+    const config = parseConfig(configStr)
+
+    console.log(`[Flash Clock] Config subtitles: type=${type}, id=${id}`)
+
+    if (!['movie', 'series'].includes(type)) {
+        return res.json({ subtitles: [] })
+    }
+
+    const cfgEncoded = encodeConfig({
+        timeFormat: config.timeFormat || DEFAULTS.timeFormat,
+        flashDurationSec: config.flashDurationSec || DEFAULTS.flashDurationSec,
+        repeatIntervalSec: config.repeatIntervalSec || DEFAULTS.repeatIntervalSec,
+        mode: config.mode || DEFAULTS.mode
+    })
+
+    const baseUrl = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : (process.env.ADDON_URL || `http://localhost:${PORT}`)
+
+    res.json({
+        subtitles: [
+            {
+                id: 'flashclock-time',
+                lang: 'eng',
+                label: '🕒 Flash Clock (Top Right)',
+                url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}`
+            }
+        ]
+    })
+})
+
+// Mount Stremio addon router (for base install without config)
 app.use(getRouter(builder.getInterface()))
 
 // Export for Vercel serverless
