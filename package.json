@@ -1,29 +1,32 @@
 {
-  "name": "clockrr",
+  "name": "flashclock-stremio",
   "version": "1.0.0",
-  "description": "A clock addon for [Stremio](https://www.stremio.com/) media player.",
+  "description": "Flash Clock - A Stremio subtitle addon that briefly flashes the current time in the top-right corner",
   "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js --launch",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node index.js"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Kepners/clockrr.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "stremio",
+    "addon",
+    "clock",
+    "subtitles",
+    "time"
+  ],
+  "author": "Kepners",
+  "license": "MIT",
   "type": "commonjs",
   "bugs": {
     "url": "https://github.com/Kepners/clockrr/issues"
   },
   "homepage": "https://github.com/Kepners/clockrr#readme",
   "dependencies": {
+    "express": "^5.2.1",
     "stremio-addon-sdk": "^1.6.10"
   }
 }
