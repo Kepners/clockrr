@@ -238,9 +238,9 @@ builder.defineSubtitlesHandler(({ type, id, config }) => {
         mode: userConfig.mode || DEFAULTS.mode
     })
 
-    // Get the addon base URL (auto-detect Vercel deployment)
-    const baseUrl = process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
+    // Get the addon base URL - use production URL for Vercel
+    const baseUrl = process.env.VERCEL
+        ? 'https://clockrr.vercel.app'
         : (process.env.ADDON_URL || `http://localhost:${PORT}`)
 
     return Promise.resolve({
@@ -935,8 +935,8 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
         mode: config.mode || DEFAULTS.mode
     })
 
-    const baseUrl = process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
+    const baseUrl = process.env.VERCEL
+        ? 'https://clockrr.vercel.app'
         : (process.env.ADDON_URL || `http://localhost:${PORT}`)
 
     res.json({
