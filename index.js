@@ -282,130 +282,395 @@ app.get('/', (req, res) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flash Clock - Stremio Addon</title>
     <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico">
+    <meta name="description" content="See the real time while watching movies and TV shows. Flash Clock adds a subtle clock overlay via subtitles.">
+    <meta property="og:title" content="Flash Clock - Stremio Addon">
+    <meta property="og:description" content="See the real time while watching - via subtitle overlay">
+    <meta property="og:image" content="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --taupe: #524948;
+            --grape: #57467B;
+            --teal: #7CB4B8;
+            --mint: #70F8BA;
+            --chartreuse: #CAFE48;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #524948 0%, #3a3433 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--taupe);
+            min-height: 100vh;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* Animated background */
+        .bg-gradient {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background:
+                radial-gradient(ellipse at 20% 20%, rgba(87, 70, 123, 0.4) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(124, 180, 184, 0.3) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 50%, rgba(112, 248, 186, 0.1) 0%, transparent 70%),
+                linear-gradient(180deg, #524948 0%, #3a3433 100%);
+            z-index: -1;
+        }
+
+        .bg-grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+            z-index: -1;
+        }
+
+        /* Floating particles */
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: var(--mint);
+            border-radius: 50%;
+            opacity: 0.3;
+            animation: float 20s infinite ease-in-out;
+        }
+
+        .particle:nth-child(1) { left: 10%; animation-delay: 0s; animation-duration: 25s; }
+        .particle:nth-child(2) { left: 20%; animation-delay: 2s; animation-duration: 20s; }
+        .particle:nth-child(3) { left: 30%; animation-delay: 4s; animation-duration: 28s; }
+        .particle:nth-child(4) { left: 40%; animation-delay: 1s; animation-duration: 22s; }
+        .particle:nth-child(5) { left: 50%; animation-delay: 3s; animation-duration: 24s; }
+        .particle:nth-child(6) { left: 60%; animation-delay: 5s; animation-duration: 26s; }
+        .particle:nth-child(7) { left: 70%; animation-delay: 2s; animation-duration: 21s; }
+        .particle:nth-child(8) { left: 80%; animation-delay: 4s; animation-duration: 27s; }
+        .particle:nth-child(9) { left: 90%; animation-delay: 1s; animation-duration: 23s; }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(100vh) scale(1); opacity: 0; }
+            10% { opacity: 0.3; }
+            90% { opacity: 0.3; }
+            100% { transform: translateY(-100px) scale(1.5); opacity: 0; }
+        }
+
+        /* Main content */
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 60px 24px;
             min-height: 100vh;
             display: flex;
-            align-items: center;
+            flex-direction: column;
             justify-content: center;
-            padding: 20px;
-            color: #fff;
         }
-        .container {
+
+        /* Hero section */
+        .hero {
             text-align: center;
-            max-width: 600px;
+            margin-bottom: 64px;
         }
-        .logo {
-            width: 120px;
-            height: 120px;
-            margin-bottom: 24px;
-            filter: drop-shadow(0 8px 24px rgba(0,0,0,0.3));
-        }
-        h1 {
-            font-size: 48px;
-            margin-bottom: 12px;
-            text-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        }
-        .tagline {
-            font-size: 20px;
-            opacity: 0.9;
-            margin-bottom: 32px;
-        }
-        .features {
-            background: rgba(255,255,255,0.1);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 32px;
-            text-align: left;
-        }
-        .features h3 {
-            margin-bottom: 16px;
-            font-size: 18px;
-        }
-        .features ul {
-            list-style: none;
-            padding: 0;
-        }
-        .features li {
-            padding: 8px 0;
-            padding-left: 28px;
+
+        .logo-wrapper {
             position: relative;
+            display: inline-block;
+            margin-bottom: 32px;
         }
-        .features li::before {
-            content: "✓";
+
+        .logo {
+            width: 140px;
+            height: 140px;
+            filter: drop-shadow(0 0 40px rgba(112, 248, 186, 0.4));
+            animation: pulse 3s ease-in-out infinite;
+        }
+
+        .logo-glow {
             position: absolute;
-            left: 0;
-            color: #70F8BA;
-            font-weight: bold;
+            top: 50%;
+            left: 50%;
+            width: 200px;
+            height: 200px;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(circle, rgba(112, 248, 186, 0.3) 0%, transparent 70%);
+            animation: glow 3s ease-in-out infinite;
+            z-index: -1;
         }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        @keyframes glow {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
+            50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.8; }
+        }
+
+        h1 {
+            font-size: 64px;
+            font-weight: 800;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #fff 0%, var(--teal) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -2px;
+        }
+
+        .tagline {
+            font-size: 24px;
+            font-weight: 400;
+            opacity: 0.8;
+            margin-bottom: 16px;
+        }
+
+        /* Live clock demo */
+        .clock-demo {
+            display: inline-block;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 48px;
+            font-weight: 500;
+            padding: 16px 32px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            border: 1px solid rgba(112, 248, 186, 0.3);
+            color: var(--mint);
+            text-shadow: 0 0 20px rgba(112, 248, 186, 0.5);
+            margin-top: 24px;
+            animation: clockPulse 1s ease-in-out infinite;
+        }
+
+        @keyframes clockPulse {
+            0%, 100% { box-shadow: 0 0 20px rgba(112, 248, 186, 0.2); }
+            50% { box-shadow: 0 0 40px rgba(112, 248, 186, 0.4); }
+        }
+
+        /* Features grid */
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-bottom: 64px;
+        }
+
+        .feature-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 28px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .feature-card:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(112, 248, 186, 0.3);
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+        }
+
+        .feature-icon {
+            font-size: 36px;
+            margin-bottom: 16px;
+        }
+
+        .feature-card h3 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .feature-card p {
+            font-size: 15px;
+            opacity: 0.7;
+            line-height: 1.6;
+        }
+
+        /* CTA section */
+        .cta {
+            text-align: center;
+        }
+
         .buttons {
             display: flex;
-            gap: 16px;
+            gap: 20px;
             justify-content: center;
             flex-wrap: wrap;
+            margin-bottom: 32px;
         }
+
         .btn {
-            display: inline-block;
-            padding: 16px 32px;
-            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 18px 36px;
+            border-radius: 12px;
             font-size: 18px;
             font-weight: 600;
             text-decoration: none;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: all 0.3s ease;
+            cursor: pointer;
         }
-        .btn:hover {
-            transform: translateY(-2px);
-        }
+
         .btn-primary {
-            background: linear-gradient(135deg, #70F8BA 0%, #CAFE48 100%);
-            color: #333;
-            box-shadow: 0 8px 24px rgba(112, 248, 186, 0.3);
+            background: linear-gradient(135deg, var(--mint) 0%, var(--chartreuse) 100%);
+            color: #1a1a1a;
+            box-shadow: 0 8px 32px rgba(112, 248, 186, 0.4);
         }
+
+        .btn-primary:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 12px 40px rgba(112, 248, 186, 0.5);
+        }
+
         .btn-secondary {
-            background: rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.1);
             color: #fff;
-            border: 2px solid rgba(255,255,255,0.3);
+            border: 2px solid rgba(255,255,255,0.2);
+            backdrop-filter: blur(10px);
         }
+
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.15);
+            border-color: var(--teal);
+            transform: translateY(-3px);
+        }
+
+        /* Footer */
         .footer {
+            text-align: center;
+            padding-top: 48px;
+            border-top: 1px solid rgba(255,255,255,0.1);
             margin-top: 48px;
-            opacity: 0.6;
+        }
+
+        .footer p {
+            opacity: 0.5;
             font-size: 14px;
         }
+
         .footer a {
-            color: #7CB4B8;
+            color: var(--teal);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .footer a:hover {
+            color: var(--mint);
+        }
+
+        .made-with {
+            margin-top: 12px;
+            font-size: 13px;
+            opacity: 0.4;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            h1 { font-size: 40px; }
+            .tagline { font-size: 18px; }
+            .clock-demo { font-size: 32px; padding: 12px 24px; }
+            .container { padding: 40px 20px; }
         }
     </style>
 </head>
 <body>
+    <div class="bg-gradient"></div>
+    <div class="bg-grid"></div>
+    <div class="particles">
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+    </div>
+
     <div class="container">
-        <img src="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico" alt="Flash Clock" class="logo">
-        <h1>🕒 Flash Clock</h1>
-        <p class="tagline">See the real time while watching - via subtitle overlay</p>
+        <div class="hero">
+            <div class="logo-wrapper">
+                <div class="logo-glow"></div>
+                <img src="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico" alt="Flash Clock" class="logo">
+            </div>
+            <h1>Flash Clock</h1>
+            <p class="tagline">Know the time without leaving your movie</p>
+            <div class="clock-demo" id="liveClock">--:--:--</div>
+        </div>
 
         <div class="features">
-            <h3>Features</h3>
-            <ul>
-                <li>Shows current time in top-right corner</li>
-                <li>Flash mode - appears briefly, then disappears</li>
-                <li>Always-on mode for continuous display</li>
-                <li>12h or 24h time format</li>
-                <li>Configurable flash duration & interval</li>
-                <li>Works with movies & TV shows</li>
-            </ul>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>Flash Mode</h3>
+                <p>Clock appears briefly then disappears. Perfect for a quick glance without distraction.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">👁️</div>
+                <h3>Always-On Mode</h3>
+                <p>Keep the clock visible continuously in the corner. Great for time-sensitive viewing.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎨</div>
+                <h3>Fully Configurable</h3>
+                <p>Choose 12h or 24h format, flash duration, repeat interval, and display mode.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎬</div>
+                <h3>Works Everywhere</h3>
+                <p>Compatible with all movies and TV shows in Stremio. Uses subtitle overlay technology.</p>
+            </div>
         </div>
 
-        <div class="buttons">
-            <a href="stremio://clockrr.vercel.app/manifest.json" class="btn btn-primary">Install Addon</a>
-            <a href="/configure" class="btn btn-secondary">Configure</a>
+        <div class="cta">
+            <div class="buttons">
+                <a href="stremio://clockrr.vercel.app/manifest.json" class="btn btn-primary">
+                    <span>⬇️</span> Install in Stremio
+                </a>
+                <a href="/configure" class="btn btn-secondary">
+                    <span>⚙️</span> Configure Settings
+                </a>
+            </div>
         </div>
 
-        <p class="footer">
-            Open source on <a href="https://github.com/Kepners/clockrr" target="_blank">GitHub</a>
-        </p>
+        <div class="footer">
+            <p>Open source on <a href="https://github.com/Kepners/clockrr" target="_blank">GitHub</a></p>
+            <p class="made-with">Made for Stremio</p>
+        </div>
     </div>
+
+    <script>
+        function updateClock() {
+            const now = new Date();
+            const h = now.getHours().toString().padStart(2, '0');
+            const m = now.getMinutes().toString().padStart(2, '0');
+            const s = now.getSeconds().toString().padStart(2, '0');
+            document.getElementById('liveClock').textContent = h + ':' + m + ':' + s;
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+    </script>
 </body>
 </html>`)
 })
