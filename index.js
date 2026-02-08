@@ -579,6 +579,24 @@ app.get('/', (req, res) => {
             color: var(--mint);
         }
 
+        .btn-coffee {
+            display: inline-block;
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #FFDD00 0%, #FF6600 100%);
+            color: #1a1a1a;
+            font-weight: 700;
+            font-size: 16px;
+            text-decoration: none;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 16px rgba(255, 102, 0, 0.3);
+        }
+
+        .btn-coffee:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 24px rgba(255, 102, 0, 0.5);
+        }
+
         .made-with {
             margin-top: 12px;
             font-size: 13px;
@@ -655,7 +673,10 @@ app.get('/', (req, res) => {
         </div>
 
         <div class="footer">
-            <p>Open source on <a href="https://github.com/Kepners/clockrr" target="_blank">GitHub</a></p>
+            <a href="https://buymeacoffee.com/kepners" target="_blank" class="btn-coffee">
+                ☕ Buy Me a Coffee
+            </a>
+            <p style="margin-top: 20px;">Open source on <a href="https://github.com/Kepners/clockrr" target="_blank">GitHub</a></p>
             <p class="made-with">Made for Stremio</p>
         </div>
     </div>
