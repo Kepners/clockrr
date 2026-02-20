@@ -238,6 +238,26 @@ function parseBucketTime(bucket) {
 }
 
 // =============================================================================
+// SUPABASE ANALYTICS (fire-and-forget)
+// =============================================================================
+function trackView(contentId, contentType) {
+    const url = process.env.SUPABASE_URL
+    const key = process.env.SUPABASE_ANON_KEY
+    if (!url || !key || !contentId) return
+
+    fetch(`${url}/rest/v1/clockrr_views`, {
+        method: 'POST',
+        headers: {
+            'apikey': key,
+            'Authorization': `Bearer ${key}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ content_id: contentId, content_type: contentType })
+    }).catch(() => {}) // never block the response
+}
+
+// =============================================================================
 // SUBTITLES HANDLER
 // =============================================================================
 const PORT = process.env.PORT || 7000
@@ -248,6 +268,8 @@ builder.defineSubtitlesHandler(({ type, id, config }) => {
     if (!['movie', 'series'].includes(type)) {
         return Promise.resolve({ subtitles: [] })
     }
+
+    trackView(id, type)
 
     // Build the config for the VTT URL
     const userConfig = config || {}
@@ -972,6 +994,8 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
         return res.json({ subtitles: [] })
     }
 
+    trackView(id, type)
+
     const cfgEncoded = encodeConfig({
         timeFormat: config.timeFormat || DEFAULTS.timeFormat,
         flashDurationSec: config.flashDurationSec || DEFAULTS.flashDurationSec,
@@ -994,6 +1018,48 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
             }
         ]
     })
+})
+
+// =============================================================================
+// STATS / LEADERBOARD ENDPOINT
+// =============================================================================
+app.get('/stats', async (req, res) => {
+    const url = process.env.SUPABASE_URL
+    const key = process.env.SUPABASE_ANON_KEY
+
+    if (!url || !key) {
+        return res.json({ error: 'Analytics not configured' })
+    }
+
+    try {
+        // Top 20 most watched content in last 30 days
+        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+        const resp = await fetch(
+            `${url}/rest/v1/clockrr_views?select=content_id,content_type&created_at=gte.${since}`,
+            { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` } }
+        )
+        const rows = await resp.json()
+
+        // Count by content_id
+        const counts = {}
+        for (const row of rows) {
+            counts[row.content_id] = (counts[row.content_id] || { count: 0, type: row.content_type })
+            counts[row.content_id].count++
+        }
+
+        const sorted = Object.entries(counts)
+            .map(([id, { count, type }]) => ({ id, type, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 20)
+
+        res.json({
+            period: 'last_30_days',
+            total_views: rows.length,
+            top_content: sorted
+        })
+    } catch (e) {
+        res.json({ error: e.message })
+    }
 })
 
 // Mount Stremio addon router (for base install without config)
