@@ -217,6 +217,26 @@ function encodeConfig(config) {
     return Buffer.from(JSON.stringify(config)).toString('base64')
 }
 
+// Returns current time bucketed to the minute (YYYYMMDDHHMM)
+// All requests within the same minute share the same VTT URL → CDN cache hit
+function getTimeBucket(date) {
+    const d = date || new Date()
+    return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`
+}
+
+// Parse a YYYYMMDDHHMM bucket string back to a Date
+function parseBucketTime(bucket) {
+    if (!bucket || bucket.length !== 12) return new Date()
+    return new Date(
+        parseInt(bucket.slice(0, 4)),
+        parseInt(bucket.slice(4, 6)) - 1,
+        parseInt(bucket.slice(6, 8)),
+        parseInt(bucket.slice(8, 10)),
+        parseInt(bucket.slice(10, 12)),
+        0
+    )
+}
+
 // =============================================================================
 // SUBTITLES HANDLER
 // =============================================================================
@@ -243,13 +263,15 @@ builder.defineSubtitlesHandler(({ type, id, config }) => {
         ? 'https://clockrr.vercel.app'
         : (process.env.ADDON_URL || `http://localhost:${PORT}`)
 
+    const t = getTimeBucket()
+
     return Promise.resolve({
         subtitles: [
             {
                 id: 'flashclock-time',
                 lang: 'eng',
                 label: '🕒 Clockrr (Top Right)',
-                url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}`
+                url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}&t=${t}`
             }
         ]
     })
@@ -699,18 +721,20 @@ app.get('/', (req, res) => {
 // WebVTT endpoint - must be before addon router
 app.get('/flashclock.vtt', (req, res) => {
     const config = parseConfig(req.query.cfg)
-    const baseTime = new Date()
+    // Use the bucketed time from URL param so the same URL → same content → CDN cache hit
+    const baseTime = parseBucketTime(req.query.t)
 
-    // Check cache
-    let vtt = getCachedVTT(config)
+    // Check cache (keyed by config + time bucket)
+    const cacheConfig = { ...config, _t: req.query.t }
+    let vtt = getCachedVTT(cacheConfig)
     if (!vtt) {
         vtt = generateWebVTT(config, baseTime)
-        setCachedVTT(config, vtt)
+        setCachedVTT(cacheConfig, vtt)
     }
 
     res.set({
         'Content-Type': 'text/vtt; charset=utf-8',
-        'Cache-Control': 'public, max-age=30'
+        'Cache-Control': 'public, max-age=3600, s-maxage=3600'
     })
     res.send(vtt)
 })
@@ -960,13 +984,15 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
         ? 'https://clockrr.vercel.app'
         : (process.env.ADDON_URL || `http://localhost:${PORT}`)
 
+    const t = getTimeBucket()
+
     res.json({
         subtitles: [
             {
                 id: 'flashclock-time',
                 lang: 'eng',
                 label: '🕒 Clockrr (Top Right)',
-                url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}`
+                url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}&t=${t}`
             }
         ]
     })
