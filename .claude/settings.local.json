@@ -1,24 +1,54 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(timeout /t 2 /nobreak)",
-      "Bash(curl:*)",
-      "Bash(powershell -Command \"Invoke-RestMethod -Uri ''http://localhost:7000/manifest.json'' | ConvertTo-Json -Depth 10\")",
-      "Bash(powershell:*)",
-      "Bash(node:*)",
-      "mcp__ref__ref_search_documentation",
-      "mcp__google-search__search",
-      "mcp__exa__web_search_exa",
-      "mcp__duckduckgo-search__search",
-      "mcp__duckduckgo-search__fetch_content",
-      "mcp__github__search_code",
-      "mcp__github__get_file_contents",
-      "mcp__github__search_repositories",
-      "Bash(taskkill:*)",
-      "Bash(vercel --help:*)",
-      "Bash(where:*)",
-      "Bash(cloudflared tunnel:*)",
-      "Bash(set ADDON_URL=https://fairfield-that-desert-meal.trycloudflare.com)"
-    ]
-  }
+﻿{
+    "permissions":  {
+                        "allow":  [
+                                      "Bash(cat:*)",
+                                      "Bash(cloudflared tunnel:*)",
+                                      "Bash(curl:*)",
+                                      "Bash(dir:*)",
+                                      "Bash(findstr:*)",
+                                      "Bash(gh repo create:*)",
+                                      "Bash(gh repo edit:*)",
+                                      "Bash(gh repo view:*)",
+                                      "Bash(git:*)",
+                                      "Bash(ls:*)",
+                                      "Bash(node:*)",
+                                      "Bash(npm run:*)",
+                                      "Bash(npm:*)",
+                                      "Bash(npx:*)",
+                                      "Bash(powershell -Command \"Invoke-RestMethod -Uri \u0027\u0027http://localhost:7000/manifest.json\u0027\u0027 | ConvertTo-Json -Depth 10\")",
+                                      "Bash(powershell:*)",
+                                      "Bash(pytest:*)",
+                                      "Bash(rg:*)",
+                                      "Bash(set ADDON_URL=https://fairfield-that-desert-meal.trycloudflare.com)",
+                                      "Bash(taskkill:*)",
+                                      "Bash(tasklist:*)",
+                                      "Bash(timeout /t 2 /nobreak)",
+                                      "Bash(type:*)",
+                                      "Bash(vercel --help:*)",
+                                      "Bash(where:*)",
+                                      "mcp__duckduckgo-search__fetch_content",
+                                      "mcp__duckduckgo-search__search",
+                                      "mcp__exa__web_search_exa",
+                                      "mcp__github__create_repository",
+                                      "mcp__github__get_file_contents",
+                                      "mcp__github__search_code",
+                                      "mcp__github__search_repositories",
+                                      "mcp__google-search__search",
+                                      "mcp__ref__ref_search_documentation",
+                                      "mcp__substack-api__create_draft_post",
+                                      "Skill(ccc:*)",
+                                      "Skill(cs:*)",
+                                      "Skill(cu:*)",
+                                      "Skill(sc:*)",
+                                      "WebFetch(domain:clockrr.vercel.app)",
+                                      "WebFetch(domain:github.com)",
+                                      "WebFetch(domain:stremio-addons.com)"
+                                  ],
+                        "additionalDirectories":  [
+                                                      "C:\\Users\\kepne\\AppData\\Local\\Temp\\aws-api-mcp\\workdir"
+                                                  ]
+                    },
+    "env":  {
+                "EDITOR":  "code --wait"
+            }
 }
