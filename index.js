@@ -646,6 +646,105 @@ app.get('/', (req, res) => {
             opacity: 0.4;
         }
 
+        /* Leaderboard */
+        .leaderboard {
+            margin: 60px 0 20px;
+        }
+
+        .leaderboard h2 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: #fff;
+        }
+
+        .leaderboard-subtitle {
+            font-size: 14px;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 24px;
+        }
+
+        .leaderboard-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .lb-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 14px 18px;
+            text-decoration: none;
+            color: #fff;
+            transition: all 0.2s;
+        }
+
+        .lb-item:hover {
+            background: rgba(112, 248, 186, 0.08);
+            border-color: rgba(112, 248, 186, 0.3);
+            transform: translateX(4px);
+        }
+
+        .lb-rank {
+            font-size: 13px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.3);
+            width: 24px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .lb-rank.top3 {
+            color: var(--chartreuse);
+        }
+
+        .lb-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .lb-id {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            color: var(--mint);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .lb-type {
+            font-size: 11px;
+            color: rgba(255,255,255,0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+        }
+
+        .lb-count {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--teal);
+            flex-shrink: 0;
+        }
+
+        .lb-loading {
+            text-align: center;
+            padding: 30px;
+            color: rgba(255,255,255,0.3);
+            font-size: 14px;
+        }
+
+        .lb-empty {
+            text-align: center;
+            padding: 30px;
+            color: rgba(255,255,255,0.3);
+            font-size: 14px;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             h1 { font-size: 40px; }
@@ -715,6 +814,14 @@ app.get('/', (req, res) => {
             </div>
         </div>
 
+        <div class="leaderboard">
+            <h2>🔥 What People Are Watching</h2>
+            <p class="leaderboard-subtitle">Most watched content with Clockrr in the last 30 days</p>
+            <div class="leaderboard-list" id="lbList">
+                <div class="lb-loading">Loading...</div>
+            </div>
+        </div>
+
         <div class="footer">
             <a href="https://buymeacoffee.com/kepners" target="_blank" class="btn-coffee">
                 ☕ Buy Me a Coffee
@@ -734,6 +841,34 @@ app.get('/', (req, res) => {
         }
         updateClock();
         setInterval(updateClock, 1000);
+
+        // Load leaderboard
+        fetch('/stats')
+            .then(r => r.json())
+            .then(data => {
+                const el = document.getElementById('lbList');
+                if (!data.top_content || data.top_content.length === 0) {
+                    el.innerHTML = '<div class="lb-empty">No data yet — be the first to watch with Clockrr!</div>';
+                    return;
+                }
+                el.innerHTML = data.top_content.slice(0, 10).map((item, i) => {
+                    const rank = i + 1;
+                    const isImdb = item.id && item.id.startsWith('tt');
+                    const href = isImdb ? 'https://www.imdb.com/title/' + item.id + '/' : '#';
+                    const target = isImdb ? ' target="_blank" rel="noopener"' : '';
+                    return '<a href="' + href + '" class="lb-item"' + target + '>' +
+                        '<div class="lb-rank' + (rank <= 3 ? ' top3' : '') + '">' + rank + '</div>' +
+                        '<div class="lb-info">' +
+                            '<div class="lb-id">' + item.id + '</div>' +
+                            '<div class="lb-type">' + item.type + '</div>' +
+                        '</div>' +
+                        '<div class="lb-count">' + item.count + ' ' + (item.count === 1 ? 'view' : 'views') + '</div>' +
+                    '</a>';
+                }).join('');
+            })
+            .catch(() => {
+                document.getElementById('lbList').innerHTML = '<div class="lb-empty">Stats unavailable</div>';
+            });
     </script>
 </body>
 </html>`)
@@ -1060,6 +1195,187 @@ app.get('/stats', async (req, res) => {
     } catch (e) {
         res.json({ error: e.message })
     }
+})
+
+// =============================================================================
+// LEADERBOARD HTML PAGE
+// =============================================================================
+app.get('/leaderboard', (req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clockrr Leaderboard - What People Are Watching</title>
+    <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/Kepners/clockrr/master/logo.ico">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --taupe: #524948;
+            --grape: #57467B;
+            --teal: #7CB4B8;
+            --mint: #70F8BA;
+            --chartreuse: #CAFE48;
+        }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: linear-gradient(180deg, #524948 0%, #3a3433 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 40px 20px;
+        }
+        .wrap {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .back {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255,255,255,0.5);
+            text-decoration: none;
+            font-size: 14px;
+            margin-bottom: 32px;
+            transition: color 0.2s;
+        }
+        .back:hover { color: var(--mint); }
+        h1 {
+            font-size: 32px;
+            font-weight: 800;
+            margin-bottom: 6px;
+        }
+        .subtitle {
+            font-size: 14px;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 8px;
+        }
+        .total {
+            font-size: 13px;
+            color: var(--teal);
+            margin-bottom: 32px;
+        }
+        .list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 16px 20px;
+            text-decoration: none;
+            color: #fff;
+            transition: all 0.2s;
+        }
+        .item:hover {
+            background: rgba(112, 248, 186, 0.08);
+            border-color: rgba(112, 248, 186, 0.3);
+            transform: translateX(4px);
+        }
+        .rank {
+            font-size: 18px;
+            font-weight: 800;
+            width: 32px;
+            text-align: center;
+            flex-shrink: 0;
+            color: rgba(255,255,255,0.25);
+        }
+        .rank.gold { color: #FFD700; }
+        .rank.silver { color: #C0C0C0; }
+        .rank.bronze { color: #CD7F32; }
+        .info { flex: 1; min-width: 0; }
+        .id {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 15px;
+            color: var(--mint);
+        }
+        .type {
+            font-size: 11px;
+            color: rgba(255,255,255,0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 3px;
+        }
+        .count {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--teal);
+            flex-shrink: 0;
+        }
+        .imdb-badge {
+            font-size: 11px;
+            background: #F5C518;
+            color: #000;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .loading, .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: rgba(255,255,255,0.3);
+        }
+        .updated {
+            text-align: center;
+            margin-top: 32px;
+            font-size: 12px;
+            color: rgba(255,255,255,0.25);
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <a href="/" class="back">← Back to Clockrr</a>
+        <h1>🔥 What People Are Watching</h1>
+        <p class="subtitle">Top content watched with the Clockrr overlay — last 30 days</p>
+        <p class="total" id="totalViews"></p>
+        <div class="list" id="list"><div class="loading">Loading...</div></div>
+        <p class="updated" id="updated"></p>
+    </div>
+    <script>
+        fetch('/stats')
+            .then(r => r.json())
+            .then(data => {
+                if (data.total_views !== undefined) {
+                    document.getElementById('totalViews').textContent = data.total_views.toLocaleString() + ' total views tracked';
+                }
+                const el = document.getElementById('list');
+                if (!data.top_content || data.top_content.length === 0) {
+                    el.innerHTML = '<div class="empty">No data yet — be the first to watch with Clockrr!</div>';
+                    return;
+                }
+                const ranks = ['gold', 'silver', 'bronze'];
+                el.innerHTML = data.top_content.map((item, i) => {
+                    const rank = i + 1;
+                    const isImdb = item.id && item.id.startsWith('tt');
+                    const href = isImdb ? 'https://www.imdb.com/title/' + item.id + '/' : '#';
+                    const target = isImdb ? ' target="_blank" rel="noopener"' : '';
+                    const rankClass = ranks[i] || '';
+                    const badge = isImdb ? '<span class="imdb-badge">IMDb</span>' : '';
+                    return '<a href="' + href + '" class="item"' + target + '>' +
+                        '<div class="rank ' + rankClass + '">' + rank + '</div>' +
+                        '<div class="info">' +
+                            '<div class="id">' + item.id + '</div>' +
+                            '<div class="type">' + item.type + '</div>' +
+                        '</div>' +
+                        badge +
+                        '<div class="count">' + item.count.toLocaleString() + ' ' + (item.count === 1 ? 'view' : 'views') + '</div>' +
+                    '</a>';
+                }).join('');
+                document.getElementById('updated').textContent = 'Updated: ' + new Date().toLocaleString();
+            })
+            .catch(() => {
+                document.getElementById('list').innerHTML = '<div class="empty">Stats unavailable</div>';
+            });
+    </script>
+</body>
+</html>`)
 })
 
 // Mount Stremio addon router (for base install without config)
