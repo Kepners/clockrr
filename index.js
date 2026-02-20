@@ -258,10 +258,9 @@ builder.defineSubtitlesHandler(({ type, id, config }) => {
         mode: userConfig.mode || DEFAULTS.mode
     })
 
-    // Get the addon base URL - use production URL for Vercel
-    const baseUrl = process.env.VERCEL
-        ? 'https://clockrr.vercel.app'
-        : (process.env.ADDON_URL || `http://localhost:${PORT}`)
+    // Get the addon base URL - ADDON_URL env var takes priority (works for both Vercel and Beamup)
+    const baseUrl = process.env.ADDON_URL
+        || (process.env.VERCEL ? 'https://clockrr.vercel.app' : `http://localhost:${PORT}`)
 
     const t = getTimeBucket()
 
@@ -980,9 +979,8 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
         mode: config.mode || DEFAULTS.mode
     })
 
-    const baseUrl = process.env.VERCEL
-        ? 'https://clockrr.vercel.app'
-        : (process.env.ADDON_URL || `http://localhost:${PORT}`)
+    const baseUrl = process.env.ADDON_URL
+        || (process.env.VERCEL ? 'https://clockrr.vercel.app' : `http://localhost:${PORT}`)
 
     const t = getTimeBucket()
 
