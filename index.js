@@ -257,6 +257,110 @@ function trackView(contentId, contentType) {
     }).catch(() => {}) // never block the response
 }
 
+const SUPABASE_PAGE_SIZE = 1000
+const MAX_TOP_CONTENT = 20
+const STATS_CACHE_TTL_MS = 15000
+let statsCache = { timestamp: 0, payload: null }
+
+function getSupabaseHeaders(key, withCount = false) {
+    const headers = {
+        apikey: key,
+        Authorization: `Bearer ${key}`
+    }
+    if (withCount) headers.Prefer = 'count=exact'
+    return headers
+}
+
+function sortTopContentFromMap(counts) {
+    return Array.from(counts.entries())
+        .map(([id, value]) => ({
+            id,
+            type: value.type || 'movie',
+            count: value.count
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, MAX_TOP_CONTENT)
+}
+
+async function fetchExactViewsCount(url, key, sinceIso) {
+    const sinceFilter = encodeURIComponent(`gte.${sinceIso}`)
+    const countUrl = `${url}/rest/v1/clockrr_views?select=id&created_at=${sinceFilter}&limit=1`
+    const resp = await fetch(countUrl, {
+        headers: getSupabaseHeaders(key, true)
+    })
+    if (!resp.ok) {
+        throw new Error(`Count query failed (${resp.status})`)
+    }
+
+    const contentRange = resp.headers.get('content-range') || ''
+    const totalStr = contentRange.includes('/') ? contentRange.split('/')[1] : ''
+    const total = parseInt(totalStr, 10)
+    if (Number.isFinite(total)) return total
+
+    // Fallback: if count header is unavailable, fall back to response size
+    const rows = await resp.json()
+    return Array.isArray(rows) ? rows.length : 0
+}
+
+async function fetchTopContentViaAggregate(url, key, sinceIso) {
+    const sinceFilter = encodeURIComponent(`gte.${sinceIso}`)
+    const aggUrl = `${url}/rest/v1/clockrr_views?select=content_id,content_type,count:count(*)&created_at=${sinceFilter}&order=count.desc&limit=${MAX_TOP_CONTENT}`
+    const resp = await fetch(aggUrl, {
+        headers: getSupabaseHeaders(key)
+    })
+    if (!resp.ok) {
+        throw new Error(`Aggregate query failed (${resp.status})`)
+    }
+
+    const rows = await resp.json()
+    if (!Array.isArray(rows)) {
+        throw new Error('Invalid aggregate response')
+    }
+
+    return rows
+        .filter(row => row && row.content_id)
+        .map(row => ({
+            id: row.content_id,
+            type: row.content_type || 'movie',
+            count: Number(row.count) || 0
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, MAX_TOP_CONTENT)
+}
+
+async function fetchTopContentViaPaging(url, key, sinceIso, totalViews) {
+    const sinceFilter = encodeURIComponent(`gte.${sinceIso}`)
+    const counts = new Map()
+    let offset = 0
+
+    while (true) {
+        const pageUrl = `${url}/rest/v1/clockrr_views?select=content_id,content_type&created_at=${sinceFilter}&limit=${SUPABASE_PAGE_SIZE}&offset=${offset}`
+        const resp = await fetch(pageUrl, {
+            headers: getSupabaseHeaders(key)
+        })
+        if (!resp.ok) {
+            throw new Error(`Paged query failed (${resp.status})`)
+        }
+
+        const rows = await resp.json()
+        if (!Array.isArray(rows) || rows.length === 0) break
+
+        for (const row of rows) {
+            if (!row || !row.content_id) continue
+            const existing = counts.get(row.content_id) || { count: 0, type: row.content_type }
+            existing.count += 1
+            if (!existing.type && row.content_type) existing.type = row.content_type
+            counts.set(row.content_id, existing)
+        }
+
+        offset += rows.length
+        if (rows.length < SUPABASE_PAGE_SIZE) break
+        if (totalViews && offset >= totalViews) break
+    }
+
+    return sortTopContentFromMap(counts)
+}
+
 // =============================================================================
 // SUBTITLES HANDLER
 // =============================================================================
@@ -851,34 +955,37 @@ app.get('/', (req, res) => {
         }
         updateClock();
         setInterval(updateClock, 1000);
+        function loadLeaderboard() {
+            fetch('/stats?ts=' + Date.now(), { cache: 'no-store' })
+                .then(r => r.json())
+                .then(data => {
+                    const el = document.getElementById('lbList');
+                    if (!data.top_content || data.top_content.length === 0) {
+                        el.innerHTML = '<div class="lb-empty">No data yet - be the first to watch with Clockrr!</div>';
+                        return;
+                    }
+                    el.innerHTML = data.top_content.slice(0, 10).map((item, i) => {
+                        const rank = i + 1;
+                        const isImdb = item.id && item.id.startsWith('tt');
+                        const href = isImdb ? 'https://www.imdb.com/title/' + item.id + '/' : '#';
+                        const target = isImdb ? ' target="_blank" rel="noopener"' : '';
+                        return '<a href="' + href + '" class="lb-item"' + target + '>' +
+                            '<div class="lb-rank' + (rank <= 3 ? ' top3' : '') + '">' + rank + '</div>' +
+                            '<div class="lb-info">' +
+                                '<div class="lb-id">' + item.id + '</div>' +
+                                '<div class="lb-type">' + item.type + '</div>' +
+                            '</div>' +
+                            '<div class="lb-count">' + item.count + ' ' + (item.count === 1 ? 'view' : 'views') + '</div>' +
+                        '</a>';
+                    }).join('');
+                })
+                .catch(() => {
+                    document.getElementById('lbList').innerHTML = '<div class="lb-empty">Stats unavailable</div>';
+                });
+        }
 
-        // Load leaderboard
-        fetch('/stats')
-            .then(r => r.json())
-            .then(data => {
-                const el = document.getElementById('lbList');
-                if (!data.top_content || data.top_content.length === 0) {
-                    el.innerHTML = '<div class="lb-empty">No data yet — be the first to watch with Clockrr!</div>';
-                    return;
-                }
-                el.innerHTML = data.top_content.slice(0, 10).map((item, i) => {
-                    const rank = i + 1;
-                    const isImdb = item.id && item.id.startsWith('tt');
-                    const href = isImdb ? 'https://www.imdb.com/title/' + item.id + '/' : '#';
-                    const target = isImdb ? ' target="_blank" rel="noopener"' : '';
-                    return '<a href="' + href + '" class="lb-item"' + target + '>' +
-                        '<div class="lb-rank' + (rank <= 3 ? ' top3' : '') + '">' + rank + '</div>' +
-                        '<div class="lb-info">' +
-                            '<div class="lb-id">' + item.id + '</div>' +
-                            '<div class="lb-type">' + item.type + '</div>' +
-                        '</div>' +
-                        '<div class="lb-count">' + item.count + ' ' + (item.count === 1 ? 'view' : 'views') + '</div>' +
-                    '</a>';
-                }).join('');
-            })
-            .catch(() => {
-                document.getElementById('lbList').innerHTML = '<div class="lb-empty">Stats unavailable</div>';
-            });
+        loadLeaderboard();
+        setInterval(loadLeaderboard, 15000);
     </script>
 </body>
 </html>`)
@@ -1177,31 +1284,36 @@ app.get('/stats', async (req, res) => {
     }
 
     try {
-        // Top 20 most watched content in last 30 days
-        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-        const resp = await fetch(
-            `${url}/rest/v1/clockrr_views?select=content_id,content_type&created_at=gte.${since}`,
-            { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` } }
-        )
-        const rows = await resp.json()
-
-        // Count by content_id
-        const counts = {}
-        for (const row of rows) {
-            counts[row.content_id] = (counts[row.content_id] || { count: 0, type: row.content_type })
-            counts[row.content_id].count++
+        const now = Date.now()
+        if (statsCache.payload && now - statsCache.timestamp < STATS_CACHE_TTL_MS) {
+            res.set('Cache-Control', 'no-store')
+            return res.json(statsCache.payload)
         }
 
-        const sorted = Object.entries(counts)
-            .map(([id, { count, type }]) => ({ id, type, count }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 20)
+        const generatedAt = new Date()
+        const since = new Date(generatedAt.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+        const totalViews = await fetchExactViewsCount(url, key, since)
 
-        res.json({
+        let topContent = []
+        if (totalViews > 0) {
+            // Try DB-side aggregate first (fast, low bandwidth), fallback to paging if unavailable.
+            try {
+                topContent = await fetchTopContentViaAggregate(url, key, since)
+            } catch {
+                topContent = await fetchTopContentViaPaging(url, key, since, totalViews)
+            }
+        }
+
+        const payload = {
             period: 'last_30_days',
-            total_views: rows.length,
-            top_content: sorted
-        })
+            generated_at: generatedAt.toISOString(),
+            total_views: totalViews,
+            top_content: topContent
+        }
+
+        statsCache = { timestamp: now, payload }
+        res.set('Cache-Control', 'no-store')
+        res.json(payload)
     } catch (e) {
         res.json({ error: e.message })
     }
@@ -1352,40 +1464,45 @@ app.get('/leaderboard', (req, res) => {
         <p class="updated" id="updated"></p>
     </div>
     <script>
-        fetch('/stats')
-            .then(r => r.json())
-            .then(data => {
-                if (data.total_views !== undefined) {
-                    document.getElementById('totalViews').textContent = data.total_views.toLocaleString() + ' total views tracked';
-                }
-                const el = document.getElementById('list');
-                if (!data.top_content || data.top_content.length === 0) {
-                    el.innerHTML = '<div class="empty">No data yet — be the first to watch with Clockrr!</div>';
-                    return;
-                }
-                const ranks = ['gold', 'silver', 'bronze'];
-                el.innerHTML = data.top_content.map((item, i) => {
-                    const rank = i + 1;
-                    const isImdb = item.id && item.id.startsWith('tt');
-                    const href = isImdb ? 'https://www.imdb.com/title/' + item.id + '/' : '#';
-                    const target = isImdb ? ' target="_blank" rel="noopener"' : '';
-                    const rankClass = ranks[i] || '';
-                    const badge = isImdb ? '<span class="imdb-badge">IMDb</span>' : '';
-                    return '<a href="' + href + '" class="item"' + target + '>' +
-                        '<div class="rank ' + rankClass + '">' + rank + '</div>' +
-                        '<div class="info">' +
-                            '<div class="id">' + item.id + '</div>' +
-                            '<div class="type">' + item.type + '</div>' +
-                        '</div>' +
-                        badge +
-                        '<div class="count">' + item.count.toLocaleString() + ' ' + (item.count === 1 ? 'view' : 'views') + '</div>' +
-                    '</a>';
-                }).join('');
-                document.getElementById('updated').textContent = 'Updated: ' + new Date().toLocaleString();
-            })
-            .catch(() => {
-                document.getElementById('list').innerHTML = '<div class="empty">Stats unavailable</div>';
-            });
+        function loadStats() {
+            fetch('/stats?ts=' + Date.now(), { cache: 'no-store' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.total_views !== undefined) {
+                        document.getElementById('totalViews').textContent = data.total_views.toLocaleString() + ' total views tracked';
+                    }
+                    const el = document.getElementById('list');
+                    if (!data.top_content || data.top_content.length === 0) {
+                        el.innerHTML = '<div class="empty">No data yet - be the first to watch with Clockrr!</div>';
+                        return;
+                    }
+                    const ranks = ['gold', 'silver', 'bronze'];
+                    el.innerHTML = data.top_content.map((item, i) => {
+                        const rank = i + 1;
+                        const isImdb = item.id && item.id.startsWith('tt');
+                        const href = isImdb ? 'https://www.imdb.com/title/' + item.id + '/' : '#';
+                        const target = isImdb ? ' target="_blank" rel="noopener"' : '';
+                        const rankClass = ranks[i] || '';
+                        const badge = isImdb ? '<span class="imdb-badge">IMDb</span>' : '';
+                        return '<a href="' + href + '" class="item"' + target + '>' +
+                            '<div class="rank ' + rankClass + '">' + rank + '</div>' +
+                            '<div class="info">' +
+                                '<div class="id">' + item.id + '</div>' +
+                                '<div class="type">' + item.type + '</div>' +
+                            '</div>' +
+                            badge +
+                            '<div class="count">' + item.count.toLocaleString() + ' ' + (item.count === 1 ? 'view' : 'views') + '</div>' +
+                        '</a>';
+                    }).join('');
+                    document.getElementById('updated').textContent = 'Updated: ' + new Date().toLocaleString();
+                })
+                .catch(() => {
+                    document.getElementById('list').innerHTML = '<div class="empty">Stats unavailable</div>';
+                });
+        }
+
+        loadStats();
+        setInterval(loadStats, 15000);
     </script>
 </body>
 </html>`)
