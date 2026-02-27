@@ -428,6 +428,12 @@ app.get('/', (req, res) => {
             justify-content: center;
         }
 
+        .top-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 24px;
+        }
+
         /* Hero section */
         .hero {
             text-align: center;
@@ -665,8 +671,8 @@ app.get('/', (req, res) => {
         }
 
         .leaderboard-list {
-            display: flex;
-            flex-direction: column;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 10px;
         }
 
@@ -751,6 +757,8 @@ app.get('/', (req, res) => {
             .tagline { font-size: 18px; }
             .clock-demo { font-size: 32px; padding: 12px 24px; }
             .container { padding: 40px 20px; }
+            .top-actions { justify-content: center; margin-bottom: 16px; }
+            .leaderboard-list { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -770,6 +778,11 @@ app.get('/', (req, res) => {
     </div>
 
     <div class="container">
+        <div class="top-actions">
+            <a href="https://buymeacoffee.com/kepners" target="_blank" class="btn-coffee">
+                ☕ Buy Me a Coffee
+            </a>
+        </div>
         <div class="hero">
             <div class="logo-wrapper">
                 <div class="logo-glow"></div>
@@ -823,9 +836,6 @@ app.get('/', (req, res) => {
         </div>
 
         <div class="footer">
-            <a href="https://buymeacoffee.com/kepners" target="_blank" class="btn-coffee">
-                ☕ Buy Me a Coffee
-            </a>
             <p style="margin-top: 20px;">Open source on <a href="https://github.com/Kepners/clockrr" target="_blank">GitHub</a></p>
             <p class="made-with">Made for Stremio</p>
         </div>
@@ -1256,8 +1266,8 @@ app.get('/leaderboard', (req, res) => {
             margin-bottom: 32px;
         }
         .list {
-            display: flex;
-            flex-direction: column;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 10px;
         }
         .item {
@@ -1326,6 +1336,9 @@ app.get('/leaderboard', (req, res) => {
             margin-top: 32px;
             font-size: 12px;
             color: rgba(255,255,255,0.25);
+        }
+        @media (max-width: 768px) {
+            .list { grid-template-columns: 1fr; }
         }
     </style>
 </head>
