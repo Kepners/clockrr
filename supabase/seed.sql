@@ -1,0 +1,2 @@
+-- Intentionally blank.
+-- Add local seed data here if needed.

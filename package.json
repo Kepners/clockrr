@@ -5,7 +5,13 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js"
+    "dev": "node index.js",
+    "supabase": "supabase",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "supabase:db:reset": "supabase db reset",
+    "supabase:db:push": "supabase db push"
   },
   "repository": {
     "type": "git",
@@ -26,7 +32,11 @@
   },
   "homepage": "https://github.com/Kepners/clockrr#readme",
   "dependencies": {
+    "dotenv": "^16.6.1",
     "express": "^5.2.1",
     "stremio-addon-sdk": "^1.6.10"
+  },
+  "devDependencies": {
+    "supabase": "^2.76.15"
   }
 }

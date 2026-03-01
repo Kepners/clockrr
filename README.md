@@ -81,6 +81,13 @@ curl http://localhost:7000/manifest.json
 curl http://localhost:7000/flashclock.vtt
 ```
 
+## Analytics (Supabase)
+
+Clockrr uses Supabase for view analytics and leaderboard stats.
+
+- Copy `.env.example` to `.env.local` and set Supabase keys.
+- See [`docs/SUPABASE.md`](docs/SUPABASE.md) for full setup and CLI workflow.
+
 ## Color Palette
 
 | Color | Hex | Name |
