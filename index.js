@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 
-require('dotenv').config({ path: '.env.local' })
-require('dotenv').config()
+try {
+    require('dotenv').config({ path: '.env.local' })
+    require('dotenv').config()
+} catch (_err) {
+    // Optional in production when dotenv is not installed.
+}
 
 const { addonBuilder, getRouter } = require('stremio-addon-sdk')
 const express = require('express')
