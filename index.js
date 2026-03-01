@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+require('dotenv').config({ path: '.env.local' })
+require('dotenv').config()
+
 const { addonBuilder, getRouter } = require('stremio-addon-sdk')
 const express = require('express')
 
@@ -26,6 +29,10 @@ const manifest = {
     resources: ['subtitles'],
     types: ['movie', 'series'],
     catalogs: [],
+    stremioAddonsConfig: {
+        issuer: 'https://stremio-addons.net',
+        signature: 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..KgLtKC1PoD-j8qhI-KhRfA.rkzlJ3SK6rpY8yodw_4v-VhzbTyowuzeBUzjtduBcUNyzumYeqX-RKeHLfrNcelbLtDxQOWLpbGBkSUy9HAoOkJ8K4jU1IrTq_-SFB18QCBCmgc81BVutdVIayMPQ-2_.R1oeS6DraLHhHFwwzRhdPA'
+    },
     behaviorHints: {
         configurable: true,
         configurationRequired: false
@@ -240,9 +247,17 @@ function parseBucketTime(bucket) {
 // =============================================================================
 // SUPABASE ANALYTICS (fire-and-forget)
 // =============================================================================
+function getSupabaseWriteKey() {
+    return process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+}
+
+function getSupabaseReadKey() {
+    return process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+}
+
 function trackView(contentId, contentType) {
     const url = process.env.SUPABASE_URL
-    const key = process.env.SUPABASE_ANON_KEY
+    const key = getSupabaseWriteKey()
     if (!url || !key || !contentId) return
 
     fetch(`${url}/rest/v1/clockrr_views`, {
@@ -1277,7 +1292,7 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
 // =============================================================================
 app.get('/stats', async (req, res) => {
     const url = process.env.SUPABASE_URL
-    const key = process.env.SUPABASE_ANON_KEY
+    const key = getSupabaseReadKey()
 
     if (!url || !key) {
         return res.json({ error: 'Analytics not configured' })
