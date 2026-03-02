@@ -9,6 +9,7 @@ try {
 
 const { addonBuilder, getRouter } = require('stremio-addon-sdk')
 const express = require('express')
+const crypto = require('crypto')
 
 // =============================================================================
 // CONFIGURATION DEFAULTS
@@ -252,19 +253,65 @@ function parseBucketTime(bucket) {
 // SUPABASE ANALYTICS (fire-and-forget)
 // =============================================================================
 function getSupabaseWriteKey() {
-    return process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+    return (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
 }
 
 function getSupabaseReadKey() {
-    return process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+    return (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim()
 }
 
-function trackView(contentId, contentType) {
-    const url = process.env.SUPABASE_URL
+function getSupabaseUrl() {
+    return (process.env.SUPABASE_URL || '').trim()
+}
+
+function getClientIp(req) {
+    if (!req) return ''
+
+    const xForwardedFor = req.headers && req.headers['x-forwarded-for']
+    if (typeof xForwardedFor === 'string' && xForwardedFor.trim()) {
+        return xForwardedFor.split(',')[0].trim()
+    }
+
+    if (Array.isArray(xForwardedFor) && xForwardedFor.length > 0) {
+        return String(xForwardedFor[0]).split(',')[0].trim()
+    }
+
+    const xRealIp = req.headers && req.headers['x-real-ip']
+    if (typeof xRealIp === 'string' && xRealIp.trim()) {
+        return xRealIp.trim()
+    }
+
+    if (req.socket && req.socket.remoteAddress) {
+        return String(req.socket.remoteAddress)
+    }
+
+    return ''
+}
+
+function buildViewerKey(req) {
+    if (!req) return null
+
+    const ip = getClientIp(req)
+    const userAgent = req.headers && req.headers['user-agent']
+        ? String(req.headers['user-agent'])
+        : ''
+
+    if (!ip && !userAgent) return null
+
+    const salt = process.env.VIEWER_KEY_SALT || 'clockrr'
+    return crypto
+        .createHash('sha256')
+        .update(`${salt}|${ip}|${userAgent}`)
+        .digest('hex')
+        .slice(0, 32)
+}
+
+function trackView(contentId, contentType, viewerKey) {
+    const url = getSupabaseUrl()
     const key = getSupabaseWriteKey()
     if (!url || !key || !contentId) return
 
-    fetch(`${url}/rest/v1/clockrr_views`, {
+    const postPayload = (payload) => fetch(`${url}/rest/v1/clockrr_views`, {
         method: 'POST',
         headers: {
             'apikey': key,
@@ -272,40 +319,124 @@ function trackView(contentId, contentType) {
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
         },
-        body: JSON.stringify({ content_id: contentId, content_type: contentType })
-    }).catch(() => {}) // never block the response
+        body: JSON.stringify(payload)
+    })
+
+    const payload = { content_id: contentId, content_type: contentType }
+    if (viewerKey) payload.viewer_key = viewerKey
+
+    postPayload(payload)
+        .then(async resp => {
+            if (resp.ok || !viewerKey) return
+            const errorText = await resp.text().catch(() => '')
+            if (errorText.includes('viewer_key')) {
+                return postPayload({ content_id: contentId, content_type: contentType }).catch(() => {})
+            }
+        })
+        .catch(() => {}) // never block the response
 }
 
-const SUPABASE_PAGE_SIZE = 1000
+const SUPABASE_RECENT_SAMPLE_LIMIT = 5000
+const SUPABASE_SAMPLE_PAGE_SIZE = 1000
 const MAX_TOP_CONTENT = 20
+const MAX_TOP_PER_TYPE = 10
 const STATS_CACHE_TTL_MS = 15000
 let statsCache = { timestamp: 0, payload: null }
 
-function getSupabaseHeaders(key, withCount = false) {
+function getSupabaseHeaders(key, countMode) {
     const headers = {
         apikey: key,
         Authorization: `Bearer ${key}`
     }
-    if (withCount) headers.Prefer = 'count=exact'
+    if (countMode) headers.Prefer = `count=${countMode}`
     return headers
 }
 
-function sortTopContentFromMap(counts) {
-    return Array.from(counts.entries())
-        .map(([id, value]) => ({
-            id,
-            type: value.type || 'movie',
-            count: value.count
-        }))
+function normalizeContentType(contentType) {
+    return contentType === 'series' ? 'series' : 'movie'
+}
+
+function extractImdbId(contentId) {
+    if (!contentId) return null
+    const match = String(contentId).match(/tt\d+/i)
+    return match ? match[0].toLowerCase() : null
+}
+
+function normalizeContentId(contentId, contentType) {
+    if (!contentId) return ''
+    const imdbId = extractImdbId(contentId)
+    if (imdbId) return imdbId
+    if (contentType === 'series') return String(contentId).split(':')[0]
+    return String(contentId)
+}
+
+function getContentKey(type, id) {
+    return `${type}:${id}`
+}
+
+function mergeContentCount(counts, rawId, rawType, increment = 1, viewerKey) {
+    const type = normalizeContentType(rawType)
+    const id = normalizeContentId(rawId, type)
+    if (!id) return
+
+    const key = getContentKey(type, id)
+    const existing = counts.get(key) || {
+        id,
+        type,
+        count: 0,
+        _uniqueViewerKeys: new Set()
+    }
+    existing.count += Number(increment) || 0
+    if (viewerKey) {
+        existing._uniqueViewerKeys.add(String(viewerKey))
+    }
+    counts.set(key, existing)
+}
+
+function sortTopContentFromMap(counts, limit) {
+    const sorted = Array.from(counts.values())
+        .map(item => {
+            const uniqueUsers = Number.isFinite(item.unique_users)
+                ? item.unique_users
+                : (item._uniqueViewerKeys ? item._uniqueViewerKeys.size : 0)
+            const avgCallsPerUser = uniqueUsers > 0
+                ? Number((item.count / uniqueUsers).toFixed(2))
+                : null
+            return {
+                id: item.id,
+                type: item.type,
+                count: item.count,
+                total_calls: item.count,
+                unique_users: uniqueUsers,
+                avg_calls_per_user: avgCallsPerUser
+            }
+        })
         .sort((a, b) => b.count - a.count)
-        .slice(0, MAX_TOP_CONTENT)
+
+    if (typeof limit === 'number') {
+        return sorted.slice(0, limit)
+    }
+    return sorted
+}
+
+function pickTopByType(items, type, limit = MAX_TOP_PER_TYPE) {
+    return items.filter(item => item.type === type).slice(0, limit)
+}
+
+function pickTopByUniqueUsers(items, limit = MAX_TOP_CONTENT) {
+    return [...items]
+        .sort((a, b) => {
+            if (b.unique_users !== a.unique_users) return b.unique_users - a.unique_users
+            return b.count - a.count
+        })
+        .slice(0, limit)
 }
 
 async function fetchExactViewsCount(url, key, sinceIso) {
     const sinceFilter = encodeURIComponent(`gte.${sinceIso}`)
     const countUrl = `${url}/rest/v1/clockrr_views?select=id&created_at=${sinceFilter}&limit=1`
     const resp = await fetch(countUrl, {
-        headers: getSupabaseHeaders(key, true)
+        headers: getSupabaseHeaders(key, 'planned')
     })
     if (!resp.ok) {
         throw new Error(`Count query failed (${resp.status})`)
@@ -321,44 +452,62 @@ async function fetchExactViewsCount(url, key, sinceIso) {
     return Array.isArray(rows) ? rows.length : 0
 }
 
-async function fetchTopContentViaAggregate(url, key, sinceIso) {
-    const sinceFilter = encodeURIComponent(`gte.${sinceIso}`)
-    const aggUrl = `${url}/rest/v1/clockrr_views?select=content_id,content_type,count:count(*)&created_at=${sinceFilter}&order=count.desc&limit=${MAX_TOP_CONTENT}`
-    const resp = await fetch(aggUrl, {
-        headers: getSupabaseHeaders(key)
+async function fetchTopContentViaRpc(url, key, sinceIso) {
+    const rpcUrl = `${url}/rest/v1/rpc/clockrr_title_stats`
+    const resp = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: {
+            ...getSupabaseHeaders(key),
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ since_iso: sinceIso })
     })
+
     if (!resp.ok) {
-        throw new Error(`Aggregate query failed (${resp.status})`)
+        throw new Error(`RPC query failed (${resp.status})`)
     }
 
     const rows = await resp.json()
     if (!Array.isArray(rows)) {
-        throw new Error('Invalid aggregate response')
+        throw new Error('Invalid RPC response')
     }
 
-    return rows
-        .filter(row => row && row.content_id)
-        .map(row => ({
-            id: row.content_id,
-            type: row.content_type || 'movie',
-            count: Number(row.count) || 0
-        }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, MAX_TOP_CONTENT)
+    const merged = new Map()
+    for (const row of rows) {
+        if (!row || !row.content_id) continue
+
+        const type = normalizeContentType(row.content_type)
+        const id = normalizeContentId(row.content_id, type)
+        if (!id) continue
+
+        const mapKey = getContentKey(type, id)
+        const existing = merged.get(mapKey) || {
+            id,
+            type,
+            count: 0,
+            unique_users: 0
+        }
+        existing.count += Number(row.total_calls) || 0
+        existing.unique_users += Number(row.unique_users) || 0
+        merged.set(mapKey, existing)
+    }
+
+    return sortTopContentFromMap(merged)
 }
 
-async function fetchTopContentViaPaging(url, key, sinceIso, totalViews) {
+async function fetchTopContentFromRecentSample(url, key, sinceIso) {
     const sinceFilter = encodeURIComponent(`gte.${sinceIso}`)
-    const counts = new Map()
-    let offset = 0
+    const merged = new Map()
+    let sampledRows = 0
 
-    while (true) {
-        const pageUrl = `${url}/rest/v1/clockrr_views?select=content_id,content_type&created_at=${sinceFilter}&limit=${SUPABASE_PAGE_SIZE}&offset=${offset}`
-        const resp = await fetch(pageUrl, {
+    for (let offset = 0; offset < SUPABASE_RECENT_SAMPLE_LIMIT; offset += SUPABASE_SAMPLE_PAGE_SIZE) {
+        const pageLimit = Math.min(SUPABASE_SAMPLE_PAGE_SIZE, SUPABASE_RECENT_SAMPLE_LIMIT - offset)
+        const sampleUrl = `${url}/rest/v1/clockrr_views?select=content_id,content_type&created_at=${sinceFilter}&order=created_at.desc&limit=${pageLimit}&offset=${offset}`
+        const resp = await fetch(sampleUrl, {
             headers: getSupabaseHeaders(key)
         })
         if (!resp.ok) {
-            throw new Error(`Paged query failed (${resp.status})`)
+            throw new Error(`Sample query failed (${resp.status})`)
         }
 
         const rows = await resp.json()
@@ -366,24 +515,51 @@ async function fetchTopContentViaPaging(url, key, sinceIso, totalViews) {
 
         for (const row of rows) {
             if (!row || !row.content_id) continue
-            const existing = counts.get(row.content_id) || { count: 0, type: row.content_type }
-            existing.count += 1
-            if (!existing.type && row.content_type) existing.type = row.content_type
-            counts.set(row.content_id, existing)
+            mergeContentCount(merged, row.content_id, row.content_type, 1)
         }
 
-        offset += rows.length
-        if (rows.length < SUPABASE_PAGE_SIZE) break
-        if (totalViews && offset >= totalViews) break
+        sampledRows += rows.length
+        if (rows.length < pageLimit) break
     }
 
-    return sortTopContentFromMap(counts)
+    return {
+        ranked: sortTopContentFromMap(merged),
+        sampleSize: sampledRows
+    }
 }
 
 // =============================================================================
 // SUBTITLES HANDLER
 // =============================================================================
 const PORT = process.env.PORT || 7000
+
+function buildSubtitlesResponse(type, id, userConfig = {}) {
+    if (!['movie', 'series'].includes(type)) {
+        return { subtitles: [] }
+    }
+
+    const cfgEncoded = encodeConfig({
+        timeFormat: userConfig.timeFormat || DEFAULTS.timeFormat,
+        flashDurationSec: userConfig.flashDurationSec || DEFAULTS.flashDurationSec,
+        repeatIntervalSec: userConfig.repeatIntervalSec || DEFAULTS.repeatIntervalSec,
+        mode: userConfig.mode || DEFAULTS.mode
+    })
+
+    const baseUrl = process.env.ADDON_URL
+        || (process.env.VERCEL ? 'https://clockrr.vercel.app' : `http://localhost:${PORT}`)
+    const t = getTimeBucket()
+
+    return {
+        subtitles: [
+            {
+                id: 'flashclock-time',
+                lang: 'eng',
+                label: 'Clockrr (Top Right)',
+                url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}&t=${t}`
+            }
+        ]
+    }
+}
 
 builder.defineSubtitlesHandler(({ type, id, config }) => {
     console.log(`[Clockrr] Subtitles request: type=${type}, id=${id}`)
@@ -393,32 +569,7 @@ builder.defineSubtitlesHandler(({ type, id, config }) => {
     }
 
     trackView(id, type)
-
-    // Build the config for the VTT URL
-    const userConfig = config || {}
-    const cfgEncoded = encodeConfig({
-        timeFormat: userConfig.timeFormat || DEFAULTS.timeFormat,
-        flashDurationSec: userConfig.flashDurationSec || DEFAULTS.flashDurationSec,
-        repeatIntervalSec: userConfig.repeatIntervalSec || DEFAULTS.repeatIntervalSec,
-        mode: userConfig.mode || DEFAULTS.mode
-    })
-
-    // Get the addon base URL - ADDON_URL env var takes priority (works for both Vercel and Beamup)
-    const baseUrl = process.env.ADDON_URL
-        || (process.env.VERCEL ? 'https://clockrr.vercel.app' : `http://localhost:${PORT}`)
-
-    const t = getTimeBucket()
-
-    return Promise.resolve({
-        subtitles: [
-            {
-                id: 'flashclock-time',
-                lang: 'eng',
-                label: '🕒 Clockrr (Top Right)',
-                url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}&t=${t}`
-            }
-        ]
-    })
+    return Promise.resolve(buildSubtitlesResponse(type, id, config || {}))
 })
 
 // =============================================================================
@@ -793,20 +944,42 @@ app.get('/', (req, res) => {
             margin-bottom: 24px;
         }
 
-        .leaderboard-list {
+        .leaderboard-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .lb-panel {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 14px;
+            padding: 14px;
+            backdrop-filter: blur(8px);
+        }
+
+        .lb-panel h3 {
+            font-size: 15px;
+            color: rgba(255,255,255,0.75);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .leaderboard-list {
+            display: flex;
+            flex-direction: column;
             gap: 10px;
         }
 
         .lb-item {
             display: flex;
             align-items: center;
-            gap: 14px;
+            gap: 12px;
             background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.08);
             border-radius: 12px;
-            padding: 14px 18px;
+            padding: 10px;
             text-decoration: none;
             color: #fff;
             transition: all 0.2s;
@@ -815,14 +988,14 @@ app.get('/', (req, res) => {
         .lb-item:hover {
             background: rgba(112, 248, 186, 0.08);
             border-color: rgba(112, 248, 186, 0.3);
-            transform: translateX(4px);
+            transform: translateY(-1px);
         }
 
         .lb-rank {
             font-size: 13px;
             font-weight: 700;
             color: rgba(255,255,255,0.3);
-            width: 24px;
+            width: 22px;
             text-align: center;
             flex-shrink: 0;
         }
@@ -831,15 +1004,32 @@ app.get('/', (req, res) => {
             color: var(--chartreuse);
         }
 
+        .lb-poster {
+            width: 42px;
+            height: 62px;
+            object-fit: cover;
+            border-radius: 8px;
+            flex-shrink: 0;
+            background: rgba(255,255,255,0.08);
+        }
+
+        .lb-poster-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            color: rgba(255,255,255,0.45);
+        }
+
         .lb-info {
             flex: 1;
             min-width: 0;
         }
 
-        .lb-id {
-            font-family: 'JetBrains Mono', monospace;
+        .lb-title {
             font-size: 14px;
-            color: var(--mint);
+            font-weight: 600;
+            color: #fff;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -853,20 +1043,16 @@ app.get('/', (req, res) => {
             margin-top: 2px;
         }
 
-        .lb-count {
-            font-size: 13px;
+        .lb-metrics {
+            font-size: 11px;
             font-weight: 600;
+            line-height: 1.35;
             color: var(--teal);
+            text-align: right;
             flex-shrink: 0;
         }
 
-        .lb-loading {
-            text-align: center;
-            padding: 30px;
-            color: rgba(255,255,255,0.3);
-            font-size: 14px;
-        }
-
+        .lb-loading,
         .lb-empty {
             text-align: center;
             padding: 30px;
@@ -881,7 +1067,7 @@ app.get('/', (req, res) => {
             .clock-demo { font-size: 32px; padding: 12px 24px; }
             .container { padding: 40px 20px; }
             .top-actions { justify-content: center; margin-bottom: 16px; }
-            .leaderboard-list { grid-template-columns: 1fr; }
+            .leaderboard-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -952,9 +1138,20 @@ app.get('/', (req, res) => {
 
         <div class="leaderboard">
             <h2>🔥 What People Are Watching</h2>
-            <p class="leaderboard-subtitle">Most watched content with Clockrr in the last 30 days</p>
-            <div class="leaderboard-list" id="lbList">
-                <div class="lb-loading">Loading...</div>
+            <p class="leaderboard-subtitle">Recent usage by title: total calls, unique users, and average calls per user</p>
+            <div class="leaderboard-grid">
+                <div class="lb-panel">
+                    <h3>Top Movies</h3>
+                    <div class="leaderboard-list" id="lbMovies">
+                        <div class="lb-loading">Loading...</div>
+                    </div>
+                </div>
+                <div class="lb-panel">
+                    <h3>Top TV Shows</h3>
+                    <div class="leaderboard-list" id="lbSeries">
+                        <div class="lb-loading">Loading...</div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -972,37 +1169,137 @@ app.get('/', (req, res) => {
             const s = now.getSeconds().toString().padStart(2, '0');
             document.getElementById('liveClock').textContent = h + ':' + m + ':' + s;
         }
-        updateClock();
-        setInterval(updateClock, 1000);
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatAverage(value) {
+            if (value === null || value === undefined) return 'n/a';
+            const num = Number(value);
+            if (!Number.isFinite(num)) return 'n/a';
+            return num.toFixed(2);
+        }
+
+        let uniqueUsersAvailable = false;
+        const cinemetaCache = new Map();
+
+        function getNormalizedContentId(item) {
+            const rawId = String((item && item.id) || '');
+            const imdbMatch = rawId.match(/tt\\d+/i);
+            if (imdbMatch) return imdbMatch[0].toLowerCase();
+            if (item && item.type === 'series') return rawId.split(':')[0];
+            return rawId;
+        }
+
+        function resolveMetadata(item) {
+            const normalizedId = getNormalizedContentId(item);
+            const baseItem = Object.assign({}, item, { id: normalizedId || item.id });
+
+            if (!normalizedId || !normalizedId.startsWith('tt')) {
+                return Promise.resolve(Object.assign({}, baseItem, {
+                    title: item.title || normalizedId || item.id || 'Unknown',
+                    poster: item.poster || null,
+                    href: '#'
+                }));
+            }
+
+            const type = item.type === 'series' ? 'series' : 'movie';
+            const cacheKey = type + ':' + normalizedId;
+
+            if (!cinemetaCache.has(cacheKey)) {
+                const request = fetch('https://v3-cinemeta.strem.io/meta/' + type + '/' + encodeURIComponent(normalizedId) + '.json')
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(data) {
+                        const meta = data && data.meta ? data.meta : null;
+                        return Object.assign({}, baseItem, {
+                            title: (meta && (meta.name || meta.title)) || normalizedId,
+                            poster: (meta && (meta.poster || meta.background)) || null,
+                            href: 'https://www.imdb.com/title/' + normalizedId + '/'
+                        });
+                    })
+                    .catch(function() {
+                        return Object.assign({}, baseItem, {
+                            title: normalizedId,
+                            poster: null,
+                            href: 'https://www.imdb.com/title/' + normalizedId + '/'
+                        });
+                    });
+                cinemetaCache.set(cacheKey, request);
+            }
+
+            return cinemetaCache.get(cacheKey);
+        }
+
+        function renderLeaderboardList(listId, items, emptyMessage) {
+            const el = document.getElementById(listId);
+            if (!Array.isArray(items) || items.length === 0) {
+                el.innerHTML = '<div class="lb-empty">' + emptyMessage + '</div>';
+                return;
+            }
+
+            el.innerHTML = items.slice(0, 10).map(function(item, i) {
+                const rank = i + 1;
+                const title = escapeHtml(item.title || item.id || 'Unknown');
+                const poster = item.poster
+                    ? '<img class="lb-poster" src="' + escapeHtml(item.poster) + '" alt="' + title + ' poster" loading="lazy">'
+                    : '<div class="lb-poster lb-poster-placeholder">No art</div>';
+                const typeLabel = item.type === 'series' ? 'TV SHOW' : 'MOVIE';
+                const href = item.href && item.href !== '#' ? item.href : '';
+                const totalCalls = Number(item.total_calls !== undefined ? item.total_calls : item.count || 0);
+                const uniqueUsers = Number(item.unique_users || 0);
+                const uniqueUsersLabel = uniqueUsers.toLocaleString();
+                const avgCalls = uniqueUsers > 0 ? formatAverage(item.avg_calls_per_user) : 'n/a';
+                const openTag = href
+                    ? '<a href="' + escapeHtml(href) + '" class="lb-item" target="_blank" rel="noopener">'
+                    : '<div class="lb-item">';
+                const closeTag = href ? '</a>' : '</div>';
+
+                return openTag +
+                    '<div class="lb-rank' + (rank <= 3 ? ' top3' : '') + '">' + rank + '</div>' +
+                    poster +
+                    '<div class="lb-info">' +
+                        '<div class="lb-title">' + title + '</div>' +
+                        '<div class="lb-type">' + typeLabel + '</div>' +
+                    '</div>' +
+                    '<div class="lb-metrics">' +
+                        '<div>' + totalCalls.toLocaleString() + ' calls</div>' +
+                        '<div>' + uniqueUsersLabel + ' users</div>' +
+                        '<div>avg ' + avgCalls + '</div>' +
+                    '</div>' +
+                closeTag;
+            }).join('');
+        }
+
         function loadLeaderboard() {
             fetch('/stats?ts=' + Date.now(), { cache: 'no-store' })
-                .then(r => r.json())
-                .then(data => {
-                    const el = document.getElementById('lbList');
-                    if (!data.top_content || data.top_content.length === 0) {
-                        el.innerHTML = '<div class="lb-empty">No data yet - be the first to watch with Clockrr!</div>';
-                        return;
-                    }
-                    el.innerHTML = data.top_content.slice(0, 10).map((item, i) => {
-                        const rank = i + 1;
-                        const isImdb = item.id && item.id.startsWith('tt');
-                        const href = isImdb ? 'https://www.imdb.com/title/' + item.id + '/' : '#';
-                        const target = isImdb ? ' target="_blank" rel="noopener"' : '';
-                        return '<a href="' + href + '" class="lb-item"' + target + '>' +
-                            '<div class="lb-rank' + (rank <= 3 ? ' top3' : '') + '">' + rank + '</div>' +
-                            '<div class="lb-info">' +
-                                '<div class="lb-id">' + item.id + '</div>' +
-                                '<div class="lb-type">' + item.type + '</div>' +
-                            '</div>' +
-                            '<div class="lb-count">' + item.count + ' ' + (item.count === 1 ? 'view' : 'views') + '</div>' +
-                        '</a>';
-                    }).join('');
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    const movies = Array.isArray(data.top_movies) ? data.top_movies : [];
+                    const series = Array.isArray(data.top_tv_shows) ? data.top_tv_shows : [];
+                    uniqueUsersAvailable = !!data.unique_users_available;
+                    return Promise.all([
+                        Promise.all(movies.slice(0, 10).map(resolveMetadata)),
+                        Promise.all(series.slice(0, 10).map(resolveMetadata))
+                    ]);
                 })
-                .catch(() => {
-                    document.getElementById('lbList').innerHTML = '<div class="lb-empty">Stats unavailable</div>';
+                .then(function(results) {
+                    renderLeaderboardList('lbMovies', results[0], 'No movie data yet - be the first to watch with Clockrr.');
+                    renderLeaderboardList('lbSeries', results[1], 'No TV data yet - watch a series episode with Clockrr.');
+                })
+                .catch(function() {
+                    document.getElementById('lbMovies').innerHTML = '<div class="lb-empty">Stats unavailable</div>';
+                    document.getElementById('lbSeries').innerHTML = '<div class="lb-empty">Stats unavailable</div>';
                 });
         }
 
+        updateClock();
+        setInterval(updateClock, 1000);
         loadLeaderboard();
         setInterval(loadLeaderboard, 15000);
     </script>
@@ -1254,6 +1551,20 @@ app.get('/:config/manifest.json', (req, res) => {
     res.json(configuredManifest)
 })
 
+// Base subtitles endpoint with request-based analytics
+app.get('/subtitles/:type/:id.json', (req, res) => {
+    const { type, id } = req.params
+    console.log(`[Clockrr] Base subtitles: type=${type}, id=${id}`)
+
+    if (!['movie', 'series'].includes(type)) {
+        return res.json({ subtitles: [] })
+    }
+
+    const viewerKey = buildViewerKey(req)
+    trackView(id, type, viewerKey)
+    res.json(buildSubtitlesResponse(type, id))
+})
+
 // Config-based subtitles endpoint
 app.get('/:config/subtitles/:type/:id.json', (req, res) => {
     const { config: configStr, type, id } = req.params
@@ -1265,37 +1576,16 @@ app.get('/:config/subtitles/:type/:id.json', (req, res) => {
         return res.json({ subtitles: [] })
     }
 
-    trackView(id, type)
-
-    const cfgEncoded = encodeConfig({
-        timeFormat: config.timeFormat || DEFAULTS.timeFormat,
-        flashDurationSec: config.flashDurationSec || DEFAULTS.flashDurationSec,
-        repeatIntervalSec: config.repeatIntervalSec || DEFAULTS.repeatIntervalSec,
-        mode: config.mode || DEFAULTS.mode
-    })
-
-    const baseUrl = process.env.ADDON_URL
-        || (process.env.VERCEL ? 'https://clockrr.vercel.app' : `http://localhost:${PORT}`)
-
-    const t = getTimeBucket()
-
-    res.json({
-        subtitles: [
-            {
-                id: 'flashclock-time',
-                lang: 'eng',
-                label: '🕒 Clockrr (Top Right)',
-                url: `${baseUrl}/flashclock.vtt?cfg=${cfgEncoded}&t=${t}`
-            }
-        ]
-    })
+    const viewerKey = buildViewerKey(req)
+    trackView(id, type, viewerKey)
+    res.json(buildSubtitlesResponse(type, id, config))
 })
 
 // =============================================================================
 // STATS / LEADERBOARD ENDPOINT
 // =============================================================================
 app.get('/stats', async (req, res) => {
-    const url = process.env.SUPABASE_URL
+    const url = getSupabaseUrl()
     const key = getSupabaseReadKey()
 
     if (!url || !key) {
@@ -1313,21 +1603,42 @@ app.get('/stats', async (req, res) => {
         const since = new Date(generatedAt.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
         const totalViews = await fetchExactViewsCount(url, key, since)
 
-        let topContent = []
+        let rankedContent = []
+        let statsMode = 'rpc'
+        let sampledRows = null
         if (totalViews > 0) {
-            // Try DB-side aggregate first (fast, low bandwidth), fallback to paging if unavailable.
             try {
-                topContent = await fetchTopContentViaAggregate(url, key, since)
+                rankedContent = await fetchTopContentViaRpc(url, key, since)
             } catch {
-                topContent = await fetchTopContentViaPaging(url, key, since, totalViews)
+                const sampled = await fetchTopContentFromRecentSample(url, key, since)
+                rankedContent = sampled.ranked
+                sampledRows = sampled.sampleSize
+                statsMode = 'approx_recent_sample'
             }
         }
+
+        const callsByTitleRaw = rankedContent.slice(0, MAX_TOP_CONTENT)
+        const uniqueUsersByTitleRaw = pickTopByUniqueUsers(rankedContent, MAX_TOP_CONTENT)
+        const topMoviesRaw = pickTopByType(rankedContent, 'movie')
+        const topSeriesRaw = pickTopByType(rankedContent, 'series')
+        const callsByTitle = callsByTitleRaw
+        const uniqueUsersByTitle = uniqueUsersByTitleRaw
+        const topMovies = topMoviesRaw
+        const topSeries = topSeriesRaw
 
         const payload = {
             period: 'last_30_days',
             generated_at: generatedAt.toISOString(),
             total_views: totalViews,
-            top_content: topContent
+            stats_mode: statsMode,
+            sampled_rows: sampledRows,
+            unique_users_available: rankedContent.some(item => (item.unique_users || 0) > 0),
+            top_content: callsByTitle,
+            calls_by_title: callsByTitle,
+            unique_users_by_title: uniqueUsersByTitle,
+            top_movies: topMovies,
+            top_series: topSeries,
+            top_tv_shows: topSeries
         }
 
         statsCache = { timestamp: now, payload }
@@ -1367,7 +1678,7 @@ app.get('/leaderboard', (req, res) => {
             padding: 40px 20px;
         }
         .wrap {
-            max-width: 600px;
+            max-width: 920px;
             margin: 0 auto;
         }
         .back {
@@ -1396,19 +1707,38 @@ app.get('/leaderboard', (req, res) => {
             color: var(--teal);
             margin-bottom: 32px;
         }
-        .list {
+        .boards {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+        .board {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 14px;
+            padding: 14px;
+            backdrop-filter: blur(8px);
+        }
+        .board h2 {
+            font-size: 16px;
+            margin-bottom: 12px;
+            color: rgba(255,255,255,0.85);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+        .list {
+            display: flex;
+            flex-direction: column;
             gap: 10px;
         }
         .item {
             display: flex;
             align-items: center;
-            gap: 14px;
+            gap: 12px;
             background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.08);
             border-radius: 12px;
-            padding: 16px 20px;
+            padding: 10px;
             text-decoration: none;
             color: #fff;
             transition: all 0.2s;
@@ -1416,50 +1746,59 @@ app.get('/leaderboard', (req, res) => {
         .item:hover {
             background: rgba(112, 248, 186, 0.08);
             border-color: rgba(112, 248, 186, 0.3);
-            transform: translateX(4px);
+            transform: translateY(-1px);
         }
         .rank {
-            font-size: 18px;
-            font-weight: 800;
-            width: 32px;
+            font-size: 13px;
+            font-weight: 700;
+            width: 22px;
             text-align: center;
             flex-shrink: 0;
-            color: rgba(255,255,255,0.25);
+            color: rgba(255,255,255,0.35);
         }
         .rank.gold { color: #FFD700; }
         .rank.silver { color: #C0C0C0; }
         .rank.bronze { color: #CD7F32; }
+        .poster {
+            width: 42px;
+            height: 62px;
+            border-radius: 8px;
+            object-fit: cover;
+            flex-shrink: 0;
+            background: rgba(255,255,255,0.08);
+        }
+        .poster.placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            color: rgba(255,255,255,0.45);
+        }
         .info { flex: 1; min-width: 0; }
-        .id {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 15px;
-            color: var(--mint);
+        .title {
+            font-size: 14px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .type {
             font-size: 11px;
             color: rgba(255,255,255,0.4);
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin-top: 3px;
+            margin-top: 2px;
         }
-        .count {
-            font-size: 14px;
-            font-weight: 700;
-            color: var(--teal);
-            flex-shrink: 0;
-        }
-        .imdb-badge {
+        .metrics {
             font-size: 11px;
-            background: #F5C518;
-            color: #000;
-            font-weight: 700;
-            padding: 2px 6px;
-            border-radius: 4px;
+            line-height: 1.35;
+            color: var(--teal);
+            text-align: right;
             flex-shrink: 0;
         }
         .loading, .empty {
             text-align: center;
-            padding: 60px 20px;
+            padding: 30px 20px;
             color: rgba(255,255,255,0.3);
         }
         .updated {
@@ -1469,7 +1808,7 @@ app.get('/leaderboard', (req, res) => {
             color: rgba(255,255,255,0.25);
         }
         @media (max-width: 768px) {
-            .list { grid-template-columns: 1fr; }
+            .boards { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -1477,46 +1816,152 @@ app.get('/leaderboard', (req, res) => {
     <div class="wrap">
         <a href="/" class="back">← Back to Clockrr</a>
         <h1>🔥 What People Are Watching</h1>
-        <p class="subtitle">Top content watched with the Clockrr overlay — last 30 days</p>
+        <p class="subtitle">Two views of recent activity: calls volume and unique users</p>
         <p class="total" id="totalViews"></p>
-        <div class="list" id="list"><div class="loading">Loading...</div></div>
+        <div class="boards">
+            <div class="board">
+                <h2>Calls by Title</h2>
+                <div class="list" id="callsList"><div class="loading">Loading...</div></div>
+            </div>
+            <div class="board">
+                <h2>Unique Users by Title</h2>
+                <div class="list" id="usersList"><div class="loading">Loading...</div></div>
+            </div>
+        </div>
         <p class="updated" id="updated"></p>
     </div>
     <script>
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatAverage(value) {
+            if (value === null || value === undefined) return 'n/a';
+            const num = Number(value);
+            if (!Number.isFinite(num)) return 'n/a';
+            return num.toFixed(2);
+        }
+
+        let uniqueUsersAvailable = false;
+        const cinemetaCache = new Map();
+
+        function getNormalizedContentId(item) {
+            const rawId = String((item && item.id) || '');
+            const imdbMatch = rawId.match(/tt\\d+/i);
+            if (imdbMatch) return imdbMatch[0].toLowerCase();
+            if (item && item.type === 'series') return rawId.split(':')[0];
+            return rawId;
+        }
+
+        function resolveMetadata(item) {
+            const normalizedId = getNormalizedContentId(item);
+            const baseItem = Object.assign({}, item, { id: normalizedId || item.id });
+
+            if (!normalizedId || !normalizedId.startsWith('tt')) {
+                return Promise.resolve(Object.assign({}, baseItem, {
+                    title: item.title || normalizedId || item.id || 'Unknown',
+                    poster: item.poster || null,
+                    href: '#'
+                }));
+            }
+
+            const type = item.type === 'series' ? 'series' : 'movie';
+            const cacheKey = type + ':' + normalizedId;
+
+            if (!cinemetaCache.has(cacheKey)) {
+                const request = fetch('https://v3-cinemeta.strem.io/meta/' + type + '/' + encodeURIComponent(normalizedId) + '.json')
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(data) {
+                        const meta = data && data.meta ? data.meta : null;
+                        return Object.assign({}, baseItem, {
+                            title: (meta && (meta.name || meta.title)) || normalizedId,
+                            poster: (meta && (meta.poster || meta.background)) || null,
+                            href: 'https://www.imdb.com/title/' + normalizedId + '/'
+                        });
+                    })
+                    .catch(function() {
+                        return Object.assign({}, baseItem, {
+                            title: normalizedId,
+                            poster: null,
+                            href: 'https://www.imdb.com/title/' + normalizedId + '/'
+                        });
+                    });
+                cinemetaCache.set(cacheKey, request);
+            }
+
+            return cinemetaCache.get(cacheKey);
+        }
+
+        function renderList(listId, items, emptyMessage) {
+            const el = document.getElementById(listId);
+            if (!Array.isArray(items) || items.length === 0) {
+                el.innerHTML = '<div class="empty">' + emptyMessage + '</div>';
+                return;
+            }
+
+            const ranks = ['gold', 'silver', 'bronze'];
+            el.innerHTML = items.slice(0, 20).map(function(item, i) {
+                const rank = i + 1;
+                const rankClass = ranks[i] || '';
+                const title = escapeHtml(item.title || item.id || 'Unknown');
+                const typeLabel = item.type === 'series' ? 'TV SHOW' : 'MOVIE';
+                const href = item.href && item.href !== '#' ? item.href : '';
+                const totalCalls = Number(item.total_calls !== undefined ? item.total_calls : item.count || 0);
+                const uniqueUsers = Number(item.unique_users || 0);
+                const uniqueUsersLabel = uniqueUsers.toLocaleString();
+                const avgCalls = uniqueUsers > 0 ? formatAverage(item.avg_calls_per_user) : 'n/a';
+                const poster = item.poster
+                    ? '<img class="poster" src="' + escapeHtml(item.poster) + '" alt="' + title + ' poster" loading="lazy">'
+                    : '<div class="poster placeholder">No art</div>';
+                const openTag = href
+                    ? '<a href="' + escapeHtml(href) + '" class="item" target="_blank" rel="noopener">'
+                    : '<div class="item">';
+                const closeTag = href ? '</a>' : '</div>';
+
+                return openTag +
+                    '<div class="rank ' + rankClass + '">' + rank + '</div>' +
+                    poster +
+                    '<div class="info">' +
+                        '<div class="title">' + title + '</div>' +
+                        '<div class="type">' + typeLabel + '</div>' +
+                    '</div>' +
+                    '<div class="metrics">' +
+                        '<div>' + totalCalls.toLocaleString() + ' calls</div>' +
+                        '<div>' + uniqueUsersLabel + ' users</div>' +
+                        '<div>avg ' + avgCalls + '</div>' +
+                    '</div>' +
+                closeTag;
+            }).join('');
+        }
+
         function loadStats() {
             fetch('/stats?ts=' + Date.now(), { cache: 'no-store' })
                 .then(r => r.json())
                 .then(data => {
                     if (data.total_views !== undefined) {
-                        document.getElementById('totalViews').textContent = data.total_views.toLocaleString() + ' total views tracked';
+                        document.getElementById('totalViews').textContent = data.total_views.toLocaleString() + ' total calls tracked';
                     }
-                    const el = document.getElementById('list');
-                    if (!data.top_content || data.top_content.length === 0) {
-                        el.innerHTML = '<div class="empty">No data yet - be the first to watch with Clockrr!</div>';
-                        return;
-                    }
-                    const ranks = ['gold', 'silver', 'bronze'];
-                    el.innerHTML = data.top_content.map((item, i) => {
-                        const rank = i + 1;
-                        const isImdb = item.id && item.id.startsWith('tt');
-                        const href = isImdb ? 'https://www.imdb.com/title/' + item.id + '/' : '#';
-                        const target = isImdb ? ' target="_blank" rel="noopener"' : '';
-                        const rankClass = ranks[i] || '';
-                        const badge = isImdb ? '<span class="imdb-badge">IMDb</span>' : '';
-                        return '<a href="' + href + '" class="item"' + target + '>' +
-                            '<div class="rank ' + rankClass + '">' + rank + '</div>' +
-                            '<div class="info">' +
-                                '<div class="id">' + item.id + '</div>' +
-                                '<div class="type">' + item.type + '</div>' +
-                            '</div>' +
-                            badge +
-                            '<div class="count">' + item.count.toLocaleString() + ' ' + (item.count === 1 ? 'view' : 'views') + '</div>' +
-                        '</a>';
-                    }).join('');
+                    uniqueUsersAvailable = !!data.unique_users_available;
+                    const calls = Array.isArray(data.calls_by_title) ? data.calls_by_title : (data.top_content || []);
+                    const users = Array.isArray(data.unique_users_by_title) ? data.unique_users_by_title : [];
+                    return Promise.all([
+                        Promise.all(calls.slice(0, 20).map(resolveMetadata)),
+                        Promise.all(users.slice(0, 20).map(resolveMetadata))
+                    ]);
+                })
+                .then(results => {
+                    renderList('callsList', results[0], 'No call data yet - be the first to watch with Clockrr.');
+                    renderList('usersList', results[1], 'No unique-user data yet. Data starts building from new tracking events.');
                     document.getElementById('updated').textContent = 'Updated: ' + new Date().toLocaleString();
                 })
                 .catch(() => {
-                    document.getElementById('list').innerHTML = '<div class="empty">Stats unavailable</div>';
+                    document.getElementById('callsList').innerHTML = '<div class="empty">Stats unavailable</div>';
+                    document.getElementById('usersList').innerHTML = '<div class="empty">Stats unavailable</div>';
                 });
         }
 
