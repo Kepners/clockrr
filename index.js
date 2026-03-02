@@ -341,6 +341,11 @@ const SUPABASE_SAMPLE_PAGE_SIZE = 1000
 const MAX_TOP_CONTENT = 20
 const MAX_TOP_PER_TYPE = 10
 const STATS_CACHE_TTL_MS = 15000
+const ROLLING_WINDOWS = [
+    { key: '24h', label: 'Last 24h' },
+    { key: '7d', label: 'Last 7d' },
+    { key: '30d', label: 'Last 30d' }
+]
 let statsCache = { timestamp: 0, payload: null }
 
 function getSupabaseHeaders(key, countMode) {
@@ -526,6 +531,59 @@ async function fetchTopContentFromRecentSample(url, key, sinceIso) {
         ranked: sortTopContentFromMap(merged),
         sampleSize: sampledRows
     }
+}
+
+function getDefaultRollingStats() {
+    return ROLLING_WINDOWS.map(window => ({
+        window: window.key,
+        label: window.label,
+        total_calls: null,
+        unique_users: null
+    }))
+}
+
+async function fetchRollingStatsViaRpc(url, key) {
+    const rpcUrl = `${url}/rest/v1/rpc/clockrr_rollup_stats`
+    const resp = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: {
+            ...getSupabaseHeaders(key),
+            'Content-Type': 'application/json'
+        },
+        body: '{}'
+    })
+
+    if (!resp.ok) {
+        throw new Error(`Rolling RPC query failed (${resp.status})`)
+    }
+
+    const rows = await resp.json()
+    if (!Array.isArray(rows)) {
+        throw new Error('Invalid rolling RPC response')
+    }
+
+    const rowsByWindow = new Map()
+    for (const row of rows) {
+        const windowKey = String(
+            row && (row.window_key || row.window || row.range_key || '')
+        ).trim()
+        if (!windowKey) continue
+
+        rowsByWindow.set(windowKey, {
+            total_calls: Number(row.total_calls),
+            unique_users: Number(row.unique_users)
+        })
+    }
+
+    return ROLLING_WINDOWS.map(window => {
+        const row = rowsByWindow.get(window.key)
+        return {
+            window: window.key,
+            label: window.label,
+            total_calls: row && Number.isFinite(row.total_calls) ? row.total_calls : null,
+            unique_users: row && Number.isFinite(row.unique_users) ? row.unique_users : null
+        }
+    })
 }
 
 // =============================================================================
@@ -941,7 +999,49 @@ app.get('/', (req, res) => {
         .leaderboard-subtitle {
             font-size: 14px;
             color: rgba(255,255,255,0.5);
-            margin-bottom: 24px;
+            margin-bottom: 14px;
+        }
+
+        .rollup-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        .rollup-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }
+
+        .rollup-label {
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.55);
+            margin-bottom: 6px;
+        }
+
+        .rollup-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1.2;
+        }
+
+        .rollup-meta {
+            font-size: 12px;
+            color: var(--teal);
+            margin-top: 2px;
+        }
+
+        .rollup-empty {
+            text-align: center;
+            color: rgba(255,255,255,0.45);
+            font-size: 12px;
+            padding: 10px;
         }
 
         .leaderboard-grid {
@@ -1067,6 +1167,7 @@ app.get('/', (req, res) => {
             .clock-demo { font-size: 32px; padding: 12px 24px; }
             .container { padding: 40px 20px; }
             .top-actions { justify-content: center; margin-bottom: 16px; }
+            .rollup-grid { grid-template-columns: 1fr; }
             .leaderboard-grid { grid-template-columns: 1fr; }
         }
     </style>
@@ -1139,6 +1240,11 @@ app.get('/', (req, res) => {
         <div class="leaderboard">
             <h2>🔥 What People Are Watching</h2>
             <p class="leaderboard-subtitle">Recent usage by title: total calls, unique users, and average calls per user</p>
+            <div class="rollup-grid" id="lbRollups">
+                <div class="rollup-card"><div class="rollup-empty">Loading rolling stats...</div></div>
+                <div class="rollup-card"><div class="rollup-empty">Loading rolling stats...</div></div>
+                <div class="rollup-card"><div class="rollup-empty">Loading rolling stats...</div></div>
+            </div>
             <div class="leaderboard-grid">
                 <div class="lb-panel">
                     <h3>Top Movies</h3>
@@ -1186,8 +1292,34 @@ app.get('/', (req, res) => {
             return num.toFixed(2);
         }
 
+        function formatCount(value) {
+            const num = Number(value);
+            return Number.isFinite(num) && num >= 0 ? num.toLocaleString() : 'n/a';
+        }
+
         let uniqueUsersAvailable = false;
         const cinemetaCache = new Map();
+
+        function renderRollupCards(elementId, rollingStats) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+
+            if (!Array.isArray(rollingStats) || rollingStats.length === 0) {
+                el.innerHTML = '<div class="rollup-card"><div class="rollup-empty">Rolling stats unavailable</div></div>';
+                return;
+            }
+
+            el.innerHTML = rollingStats.map(function(item) {
+                const label = escapeHtml(item.label || item.window || 'Window');
+                const calls = formatCount(item.total_calls);
+                const users = formatCount(item.unique_users);
+                return '<div class="rollup-card">' +
+                    '<div class="rollup-label">' + label + '</div>' +
+                    '<div class="rollup-value">' + calls + ' calls</div>' +
+                    '<div class="rollup-meta">' + users + ' users</div>' +
+                '</div>';
+            }).join('');
+        }
 
         function getNormalizedContentId(item) {
             const rawId = String((item && item.id) || '');
@@ -1282,6 +1414,7 @@ app.get('/', (req, res) => {
                 .then(function(data) {
                     const movies = Array.isArray(data.top_movies) ? data.top_movies : [];
                     const series = Array.isArray(data.top_tv_shows) ? data.top_tv_shows : [];
+                    renderRollupCards('lbRollups', data.rolling_stats);
                     uniqueUsersAvailable = !!data.unique_users_available;
                     return Promise.all([
                         Promise.all(movies.slice(0, 10).map(resolveMetadata)),
@@ -1293,6 +1426,7 @@ app.get('/', (req, res) => {
                     renderLeaderboardList('lbSeries', results[1], 'No TV data yet - watch a series episode with Clockrr.');
                 })
                 .catch(function() {
+                    renderRollupCards('lbRollups', []);
                     document.getElementById('lbMovies').innerHTML = '<div class="lb-empty">Stats unavailable</div>';
                     document.getElementById('lbSeries').innerHTML = '<div class="lb-empty">Stats unavailable</div>';
                 });
@@ -1601,7 +1735,25 @@ app.get('/stats', async (req, res) => {
 
         const generatedAt = new Date()
         const since = new Date(generatedAt.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
-        const totalViews = await fetchExactViewsCount(url, key, since)
+        const rollingStatsFromRpc = await fetchRollingStatsViaRpc(url, key).catch(() => null)
+        const rolling30dFromRpc = Array.isArray(rollingStatsFromRpc)
+            ? rollingStatsFromRpc.find(item => item.window === '30d')
+            : null
+        const totalViewsFromRolling = rolling30dFromRpc && Number.isFinite(rolling30dFromRpc.total_calls)
+            ? rolling30dFromRpc.total_calls
+            : null
+        const totalViews = Number.isFinite(totalViewsFromRolling)
+            ? totalViewsFromRolling
+            : await fetchExactViewsCount(url, key, since)
+        const rollingStats = Array.isArray(rollingStatsFromRpc) ? rollingStatsFromRpc : (() => {
+            const fallback = getDefaultRollingStats()
+            const thirtyDay = fallback.find(item => item.window === '30d')
+            if (thirtyDay) {
+                thirtyDay.total_calls = totalViews
+            }
+            return fallback
+        })()
+        const rolling30d = rollingStats.find(item => item.window === '30d') || null
 
         let rankedContent = []
         let statsMode = 'rpc'
@@ -1630,9 +1782,13 @@ app.get('/stats', async (req, res) => {
             period: 'last_30_days',
             generated_at: generatedAt.toISOString(),
             total_views: totalViews,
+            total_unique_users_30d: rolling30d && Number.isFinite(rolling30d.unique_users)
+                ? rolling30d.unique_users
+                : null,
             stats_mode: statsMode,
             sampled_rows: sampledRows,
             unique_users_available: rankedContent.some(item => (item.unique_users || 0) > 0),
+            rolling_stats: rollingStats,
             top_content: callsByTitle,
             calls_by_title: callsByTitle,
             unique_users_by_title: uniqueUsersByTitle,
@@ -1705,7 +1861,43 @@ app.get('/leaderboard', (req, res) => {
         .total {
             font-size: 13px;
             color: var(--teal);
-            margin-bottom: 32px;
+            margin-bottom: 10px;
+        }
+        .rollup-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .rollup-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }
+        .rollup-label {
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.55);
+            margin-bottom: 6px;
+        }
+        .rollup-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1.2;
+        }
+        .rollup-meta {
+            font-size: 12px;
+            color: var(--teal);
+            margin-top: 2px;
+        }
+        .rollup-empty {
+            text-align: center;
+            color: rgba(255,255,255,0.45);
+            font-size: 12px;
+            padding: 10px;
         }
         .boards {
             display: grid;
@@ -1808,6 +2000,7 @@ app.get('/leaderboard', (req, res) => {
             color: rgba(255,255,255,0.25);
         }
         @media (max-width: 768px) {
+            .rollup-grid { grid-template-columns: 1fr; }
             .boards { grid-template-columns: 1fr; }
         }
     </style>
@@ -1818,6 +2011,11 @@ app.get('/leaderboard', (req, res) => {
         <h1>🔥 What People Are Watching</h1>
         <p class="subtitle">Two views of recent activity: calls volume and unique users</p>
         <p class="total" id="totalViews"></p>
+        <div class="rollup-grid" id="rollups">
+            <div class="rollup-card"><div class="rollup-empty">Loading rolling stats...</div></div>
+            <div class="rollup-card"><div class="rollup-empty">Loading rolling stats...</div></div>
+            <div class="rollup-card"><div class="rollup-empty">Loading rolling stats...</div></div>
+        </div>
         <div class="boards">
             <div class="board">
                 <h2>Calls by Title</h2>
@@ -1847,8 +2045,34 @@ app.get('/leaderboard', (req, res) => {
             return num.toFixed(2);
         }
 
+        function formatCount(value) {
+            const num = Number(value);
+            return Number.isFinite(num) && num >= 0 ? num.toLocaleString() : 'n/a';
+        }
+
         let uniqueUsersAvailable = false;
         const cinemetaCache = new Map();
+
+        function renderRollupCards(elementId, rollingStats) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+
+            if (!Array.isArray(rollingStats) || rollingStats.length === 0) {
+                el.innerHTML = '<div class="rollup-card"><div class="rollup-empty">Rolling stats unavailable</div></div>';
+                return;
+            }
+
+            el.innerHTML = rollingStats.map(function(item) {
+                const label = escapeHtml(item.label || item.window || 'Window');
+                const calls = formatCount(item.total_calls);
+                const users = formatCount(item.unique_users);
+                return '<div class="rollup-card">' +
+                    '<div class="rollup-label">' + label + '</div>' +
+                    '<div class="rollup-value">' + calls + ' calls</div>' +
+                    '<div class="rollup-meta">' + users + ' users</div>' +
+                '</div>';
+            }).join('');
+        }
 
         function getNormalizedContentId(item) {
             const rawId = String((item && item.id) || '');
@@ -1944,8 +2168,14 @@ app.get('/leaderboard', (req, res) => {
                 .then(r => r.json())
                 .then(data => {
                     if (data.total_views !== undefined) {
-                        document.getElementById('totalViews').textContent = data.total_views.toLocaleString() + ' total calls tracked';
+                        const totalCalls = formatCount(data.total_views);
+                        const totalUsers30d = Number(data.total_unique_users_30d);
+                        const usersSuffix = Number.isFinite(totalUsers30d)
+                            ? ' | ' + totalUsers30d.toLocaleString() + ' unique users (30d)'
+                            : '';
+                        document.getElementById('totalViews').textContent = totalCalls + ' calls tracked in last 30d' + usersSuffix;
                     }
+                    renderRollupCards('rollups', data.rolling_stats);
                     uniqueUsersAvailable = !!data.unique_users_available;
                     const calls = Array.isArray(data.calls_by_title) ? data.calls_by_title : (data.top_content || []);
                     const users = Array.isArray(data.unique_users_by_title) ? data.unique_users_by_title : [];
@@ -1960,6 +2190,7 @@ app.get('/leaderboard', (req, res) => {
                     document.getElementById('updated').textContent = 'Updated: ' + new Date().toLocaleString();
                 })
                 .catch(() => {
+                    renderRollupCards('rollups', []);
                     document.getElementById('callsList').innerHTML = '<div class="empty">Stats unavailable</div>';
                     document.getElementById('usersList').innerHTML = '<div class="empty">Stats unavailable</div>';
                 });
